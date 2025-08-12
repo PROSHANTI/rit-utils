@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS</title>
+    <link rel="stylesheet" href="/static/css/style_home.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <span>RIT-UTILS</span>
+        </div>
+        <p class="subtitle">Инструменты для автоматизации рабочих процессов</p>
+    </div>
+    
+    <div class="container">
+        <a href="/send_email" class="square">
+            <i class="fas fa-envelope"></i>
+            SEND EMAIL
+            <p class="desc">Отправка отчетов по электронной почте</p>
+        </a>
+        
+        <a href="/gen_rit_cert" class="square">
+            <i class="fas fa-certificate"></i>
+            GEN RIT CERT
+            <p class="desc">Генерация подарочных сертификатов для клиентов</p>
+        </a>
+        
+        <a href="/doctor_form" class="square">
+            <i class="fas fa-file-medical"></i>
+            DOCTOR FORM
+            <p class="desc">Создание карточек пациентов</p>
+        </a>
+</div>
+{% include "footer.html" %}
+</body>
+</html>
+

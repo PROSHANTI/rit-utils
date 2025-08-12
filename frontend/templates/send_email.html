@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS</title>
+    <link rel="stylesheet" href="/static/css/style_utils.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="send-email-container">
+        <div class="logo">
+            <span>SEND EMAIL</span>
+        </div>
+        <form action="/send_email" method="post" enctype="multipart/form-data" autocomplete="off">
+            <div class="form-group">
+                <label for="cashless_pay">БЕЗНАЛИЧНАЯ ОПЛАТА</label>
+                <input type="text" id="cashless_pay" name="cashless_pay">
+            </div>
+            <div class="form-group">
+                <label for="card_pay">НА КАРТУ</label>
+                <input type="text" id="card_pay" name="card_pay">
+            </div>
+            <div class="form-group">
+                <label for="cash_pay">НАЛИЧНЫЕ</label>
+                <input type="text" id="cash_pay" name="cash_pay">
+            </div>
+            <div class="form-group">
+                <label for="qr_pay">QR КОД</label>
+                <input type="text" id="qr_pay" name="qr_pay">
+            </div>
+            <div class="form-group">
+                <label for="attachment">ВЛОЖЕНИЕ</label>
+                <input type="file" id="attachment" name="attachment" required>
+            </div>
+            {% if status %}
+            <div class="form-group">
+                <p class="status-message">{{ status }}</p>
+            </div>
+            {% endif %}
+            <button type="submit">ОТПРАВИТЬ</button>
+        </form>
+    </div>
+{% include 'footer.html' %}
+</body>
+</html>

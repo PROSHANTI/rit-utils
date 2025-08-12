@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS</title>
+    <link rel="stylesheet" href="/static/css/style_utils.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+</head>
+<body>
+    <div class="forms-container">
+        <div class="form-wrapper">
+            <div class="logo">
+                <span>DOCTOR</span>
+            </div>
+            <form action="/ge" method="post" enctype="multipart/form-data" autocomplete="off">
+                <div class="form-group">
+                    <label for="doctor_1">Доктор 1</label>
+                    <input type="text" id="doctor_1" name="doctor_1">
+                </div>
+                <div class="form-group">
+                    <label for="doctor_2">Доктор 2</label>
+                    <input type="text" id="doctor_2" name="doctor_2">
+                </div>
+                <div class="form-group">
+                    <label for="doctor_3">Доктор 3</label>
+                    <input type="text" id="sold" name="sold">
+                </div>
+                {% if status %}
+                <div class="form-group">
+                    <p class="status-message">{{ status }}</p>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="form-wrapper">
+            <div class="logo">
+                <span>PACIENT</span>
+            </div>
+            <form action="/ge" method="post" enctype="multipart/form-data" autocomplete="off">
+                <div class="form-group">
+                    <label for="field1">Пациент 1</label>
+                    <input type="text" id="field1" name="field1">
+                </div>
+                <div class="form-group">
+                    <label for="field2">Пациент 2</label>
+                    <input type="text" id="field2" name="field2">
+                </div>
+                <div class="form-group">
+                    <label for="field3">Пациент 3</label>
+                    <input type="text" id="field3" name="field3">
+                </div>
+
+            </form>
+
+        </div>
+        <button type="submit">Создать</button>
+    </div>
+{% include 'footer.html' %}
+</body>
+</html>

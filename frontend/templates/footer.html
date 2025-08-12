@@ -1,0 +1,16 @@
+<footer class="footer">
+    <div class="logout-container">
+        {% if request.path != "/home" %}
+        <form action="/home" method="get" style="display: inline-block; margin-right: 10px;">
+            <button type="submit" class="logout-btn">
+                ГЛАВНАЯ
+            </button>
+        </form>
+        {% endif %}
+        <form action="/logout" method="post" style="display: inline-block;">
+            <button type="submit" class="logout-btn">
+                ВЫХОД
+            </button>
+        </form>
+    </div>
+</footer>
