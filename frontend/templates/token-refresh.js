@@ -1,6 +1,6 @@
-// Обновление токена каждые 25 минут
-setInterval(async () => {
+async function checkAndRefreshToken() {
     try {
+
         const response = await fetch('/refresh', {
             method: 'POST',
             credentials: 'same-origin'
@@ -11,4 +11,6 @@ setInterval(async () => {
     } catch (error) {
         console.error('Error refreshing token:', error);
     }
-}, 25 * 60 * 1000);
+}
+
+document.addEventListener('DOMContentLoaded', checkAndRefreshToken);

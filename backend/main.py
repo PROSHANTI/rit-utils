@@ -21,7 +21,6 @@ load_dotenv()
 config = AuthXConfig()
 config.JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
 config.JWT_ACCESS_COOKIE_NAME = "JWT_ACCESS_TOKEN_COOKIE"
-config.JWT_ACCESS_TOKEN_EXPIRES = datetime.timedelta(minutes=30)
 config.JWT_TOKEN_LOCATION = ["cookies"]
 config.JWT_COOKIE_CSRF_PROTECT = False
 security: AuthX = AuthX(config=config)
@@ -90,6 +89,14 @@ def logout():
         httponly=True,
         samesite="lax"
     )
+    response.delete_cookie(
+        key=config.JWT_REFRESH_COOKIE_NAME,
+        path="/",
+        domain=None,
+        secure=False,
+        httponly=True,
+        samesite="lax"
+    )
     return response
 
 @app.post("/refresh", tags=['Авторизация'], summary='Обновить токен доступа')
@@ -111,7 +118,6 @@ def refresh_token(request: Request):
         )
         return response
     except Exception as e:
-
         print(f"Refresh token error: {str(e)}")
         response = RedirectResponse(url="/", status_code=303)
         response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
