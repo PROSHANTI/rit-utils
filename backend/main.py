@@ -46,16 +46,11 @@ app.mount("/static", StaticFiles(directory="frontend/templates"), name="static")
 templates = Jinja2Templates(directory="frontend/templates")
 
 
-@app.post("/login",
-          summary='Авторизация',
-          tags=['Авторизация']
-          )
-def login(request: Request,
-    username: str = Form(...),
-    password: str = Form(...)
-    ):
+@app.post("/login", summary='Авторизация', tags=['Авторизация'])
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
     if username == LOGIN and password == PASSWORD:
         response = RedirectResponse(url="/home", status_code=303)
+        
         access_token = security.create_access_token(uid='1')
         response.set_cookie(
             key=config.JWT_ACCESS_COOKIE_NAME,
@@ -63,6 +58,16 @@ def login(request: Request,
             httponly=True,
             samesite="lax"
         )
+        
+        refresh_token = security.create_refresh_token(uid='1')
+        response.set_cookie(
+            key=config.JWT_REFRESH_COOKIE_NAME,
+            value=refresh_token,
+            httponly=True,
+            samesite="lax",
+            max_age=30*24*60*60
+        )
+        
         return response
     return templates.TemplateResponse(
         "login.html",
@@ -86,6 +91,33 @@ def logout():
         samesite="lax"
     )
     return response
+
+@app.post("/refresh", tags=['Авторизация'], summary='Обновить токен доступа')
+def refresh_token(request: Request):
+    refresh_token = request.cookies.get(config.JWT_REFRESH_COOKIE_NAME)
+    
+    if not refresh_token:
+        return RedirectResponse(url="/", status_code=303)
+    
+    try:        
+        payload = security._decode_token(refresh_token)
+        new_access_token = security.create_access_token(uid=payload.sub)
+        response = RedirectResponse(url="/home", status_code=303)
+        response.set_cookie(
+            key=config.JWT_ACCESS_COOKIE_NAME,
+            value=new_access_token,
+            httponly=True,
+            samesite="lax"
+        )
+        return response
+    except Exception as e:
+
+        print(f"Refresh token error: {str(e)}")
+        response = RedirectResponse(url="/", status_code=303)
+        response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
+        response.delete_cookie(config.JWT_REFRESH_COOKIE_NAME)
+        return response
+
 
 
 @app.get("/", 
