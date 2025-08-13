@@ -6,7 +6,7 @@ import base64
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from authx import AuthX, AuthXConfig
@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+from authx.exceptions import JWTDecodeError
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ load_dotenv()
 config = AuthXConfig()
 config.JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
 config.JWT_ACCESS_COOKIE_NAME = "JWT_ACCESS_TOKEN_COOKIE"
+JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(minutes=15)
 config.JWT_TOKEN_LOCATION = ["cookies"]
 config.JWT_COOKIE_CSRF_PROTECT = False
 security: AuthX = AuthX(config=config)
@@ -124,7 +126,23 @@ def refresh_token(request: Request):
         response.delete_cookie(config.JWT_REFRESH_COOKIE_NAME)
         return response
 
-
+@app.exception_handler(JWTDecodeError)
+async def jwt_decode_exception_handler(request: Request, exc: JWTDecodeError):
+    if "expired" in str(exc).lower():
+        if request.headers.get("accept") == "application/json":
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Token expired"}
+            )
+        
+        refresh_response = RedirectResponse(url="/", status_code=303)
+        refresh_response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
+        return refresh_response
+    
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
+    response.delete_cookie(config.JWT_REFRESH_COOKIE_NAME)
+    return response
 
 @app.get("/", 
          tags=['Главная страница'], 
