@@ -44,7 +44,6 @@ def login_handler(
         if twofa_configured:
             response = RedirectResponse(url="/2fa", status_code=303)
         else:
-
             response = RedirectResponse(url="/configure-2fa", status_code=303)
             
         response.set_cookie(
