@@ -178,18 +178,18 @@ python -c "import pyotp; print(pyotp.random_base32())"
 rit-utils/
 ├── src/                       # Исходный код приложения
 │   ├── main.py               # Основное FastAPI приложение
-│   ├── email_templates.py    # Шаблоны email сообщений
 │   ├── auth/                 # Модуль аутентификации
 │   │   ├── __init__.py       # Экспорт функций авторизации
 │   │   ├── login.py          # JWT авторизация и сессии
 │   │   └── two_factor.py     # 2FA TOTP функциональность
 │   └── utils/                # Утилиты
 │       ├── __init__.py       # Экспорт утилит
-│       └── email_handler.py  # Обработка отправки email
+│       ├── email_handler.py  # Обработка отправки email
+│       └── email_templates.py # Шаблоны email сообщений
 ├── templates/                # Jinja2 шаблоны
 │   ├── css/                  # Стили CSS
 │   │   ├── style_home.css    # Стили главной страницы
-│   │   ├── style_login.css   # Стили страниц входа
+│   │   ├── style_login.css   # Стили страниц входа и 2FA
 │   │   └── style_utils.css   # Стили утилит
 │   ├── login.html            # Страница входа
 │   ├── two_factor.html       # Страница ввода 2FA кода
@@ -201,9 +201,17 @@ rit-utils/
 │   ├── footer.html           # Подвал страниц
 │   └── token-refresh.js      # Обновление JWT токенов
 ├── screenshots/              # Скриншоты приложения
+│   ├── auth.png              # Страница авторизации
+│   ├── 2fa_setup.png         # Настройка 2FA
+│   ├── 2fa.png               # Ввод кода 2FA
+│   ├── home.png              # Главная страница
+│   ├── send_email.png        # Отправка email
+│   ├── gen_cert.png          # Генерация сертификатов
+│   └── doctor_form.png       # Форма врача
+├── email_templates_examples.py # Примеры email шаблонов
 ├── pyproject.toml           # Конфигурация Poetry
 ├── Dockerfile               # Docker образ
-├── .env.example             # Пример переменных окружения
+├── LICENSE                  # Лицензия Apache 2.0
 └── README.md                # Документация проекта
 ```
 

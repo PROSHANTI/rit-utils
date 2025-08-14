@@ -98,10 +98,8 @@ def configure_2fa_page(request: Request):
     if not request.cookies.get("auth_pending"):
         return RedirectResponse(url="/", status_code=303)
     
-    username = os.getenv('USERNAME') or "admin"
-    
+    username = str(os.getenv('USERNAME'))
     user_secret = get_user_secret(username)
-    
     uri = get_totp_uri(username)
     qr_code = generate_qr_code(uri)
     
@@ -213,5 +211,5 @@ def doctor_form(request: Request):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", reload=True)
+    uvicorn.run("src.main:app", reload=True)
 
