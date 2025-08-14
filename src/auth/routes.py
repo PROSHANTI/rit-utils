@@ -2,6 +2,7 @@ from fastapi import Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from .login import get_auth_dependency, setup_2fa_session
+from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
 from .two_factor import (
     two_factor_handler,
     show_two_factor_page,
@@ -69,21 +70,8 @@ def setup_2fa_routes(app):
             }
         )
         
-        response.set_cookie(
-            key="user_totp_secret",
-            value=user_secret,
-            httponly=True,
-            secure=True,
-            samesite="strict",
-            max_age=300  # 5 минут
-        )
+        set_secure_cookie(response, request, "user_totp_secret", user_secret, max_age=300)
         
-        response.set_cookie(
-            key="2fa_configured",
-            value="true",
-            httponly=True,
-            secure=True,
-            samesite="strict"
-        )
+        set_secure_cookie(response, request, "2fa_configured", "true")
         
         return response

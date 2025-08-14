@@ -6,6 +6,7 @@ from fastapi import Request, Form, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from authx import AuthX, AuthXConfig
+from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
 from authx.exceptions import JWTDecodeError
 from dotenv import load_dotenv
 from .two_factor import is_2fa_verified
@@ -46,14 +47,7 @@ def login_handler(
         else:
             response = RedirectResponse(url="/configure-2fa", status_code=303)
             
-        response.set_cookie(
-            key="auth_pending",
-            value="true",
-            httponly=True,
-            secure=True,
-            samesite="strict",
-            max_age=300
-        )
+        set_secure_cookie(response, request, "auth_pending", "true", max_age=300)
         
         return response
     return templates.TemplateResponse(
@@ -176,28 +170,16 @@ def setup_2fa_session(request: Request):
         uid='1',
         jti=str(uuid.uuid4())
     )
-    response.set_cookie(
-        key=config.JWT_ACCESS_COOKIE_NAME,
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="strict"
-    )
+    set_secure_cookie(response, request, config.JWT_ACCESS_COOKIE_NAME, access_token)
     
     refresh_token = security.create_refresh_token(
         uid='1',
         jti=str(uuid.uuid4())
     )
-    response.set_cookie(
-        key=config.JWT_REFRESH_COOKIE_NAME,
-        value=refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="strict",  
+    set_secure_cookie(
+        response, request, config.JWT_REFRESH_COOKIE_NAME, refresh_token, 
         max_age=7*24*60*60
     )
     
-    response.delete_cookie(
-        "auth_pending", httponly=True, secure=True, samesite="strict"
-        )
+    delete_secure_cookie(response, request, "auth_pending")
     return response

@@ -7,6 +7,7 @@ from io import BytesIO
 from fastapi import Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
 
 import src.config  # noqa: F401
 
@@ -118,17 +119,13 @@ def two_factor_handler(request: Request, token: str = Form(...)):
     if user_secret:
         if verify_totp(token, username, user_secret):
             response = RedirectResponse(url="/setup-session", status_code=303)
-            response.set_cookie(
-                "2fa_verified", "true", httponly=True, secure=True, samesite="strict"
-                )
+            set_secure_cookie(response, request, "2fa_verified", "true")
             return response
     else:
         # Пробуем персональный секрет пользователя
         if verify_totp(token, username):
             response = RedirectResponse(url="/setup-session", status_code=303)
-            response.set_cookie(
-                "2fa_verified", "true", httponly=True, secure=True, samesite="strict"
-                )
+            set_secure_cookie(response, request, "2fa_verified", "true")
             return response
     
     return templates.TemplateResponse(

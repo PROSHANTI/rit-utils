@@ -13,7 +13,14 @@ except locale.Error:
     try:
         locale.setlocale(locale.LC_ALL, 'ru_RU')
     except locale.Error:
-        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+        try:
+            locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+        except locale.Error:
+            try:
+                locale.setlocale(locale.LC_ALL, 'C.UTF-8')
+            except locale.Error:
+                # Если все локали недоступны, используем дефолтную
+                locale.setlocale(locale.LC_ALL, 'C')
 
 
 def get_current_date():
