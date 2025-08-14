@@ -151,11 +151,11 @@ python -c "import pyotp; print(pyotp.random_base32())"
 
 **Настройка 2FA:**
 
-![Авторизация](screenshots/2fa_setup.png)
+![Настройка 2FA](screenshots/2fa_setup.png)
 
 **Ввод пароля 2FA:**
 
-![Авторизация](screenshots/2fa.png)
+![Ввод пароля 2FA](screenshots/2fa.png)
 
 **Главный экран:**
 
