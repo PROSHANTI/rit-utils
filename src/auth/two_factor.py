@@ -140,36 +140,32 @@ def two_factor_handler(request: Request, token: str = Form(...)):
 
     user_secret = request.cookies.get("user_totp_secret")
     
-    # Принудительная отладка через stderr (должна попасть в логи Docker)
-    import sys
-    sys.stderr.write(f"🍪 2FA HANDLER: token={token}, cookie={user_secret[:8] if user_secret else 'None'}...\n")
-    sys.stderr.flush()
-    
     # Всегда используем детерминистичный секрет для надежности
     global_secret = get_user_secret(username)
-    sys.stderr.write(f"🔑 GLOBAL SECRET: {global_secret[:8]}...\n")
-    sys.stderr.flush()
     
     # Создаем TOTP для проверки
     totp = pyotp.TOTP(global_secret)
-    current_server_code = totp.now()
-    sys.stderr.write(f"⏰ SERVER CODE NOW: {current_server_code}\n")
-    sys.stderr.flush()
     
-    # Проверяем с большим окном времени (±3 минуты)
-    verification_result = totp.verify(token, valid_window=6)
-    sys.stderr.write(f"🔍 VERIFY RESULT: {verification_result}\n")
-    sys.stderr.flush()
+    # Проверяем с ОЧЕНЬ большим окном времени (±20 минут для разных часовых поясов)
+    verification_result = totp.verify(token, valid_window=40)
+    
+    # Если стандартная проверка не прошла, пробуем с разными временными сдвигами
+    if not verification_result:
+        import time
+        current_time = int(time.time())
+        
+        # Проверяем с разными сдвигами времени (от -12 до +12 часов)
+        for hour_offset in range(-12, 13):
+            offset_time = current_time + (hour_offset * 3600)  # сдвиг в секундах
+            code_at_offset = totp.at(offset_time)
+            if code_at_offset == token:
+                verification_result = True
+                break
     
     if verification_result:
-        sys.stderr.write("✅ SUCCESS: Token verified!\n")
-        sys.stderr.flush()
         response = RedirectResponse(url="/setup-session", status_code=303)
         set_secure_cookie(response, request, "2fa_verified", "true")
         return response
-    
-    sys.stderr.write("❌ FAIL: Token verification failed\n")
-    sys.stderr.flush()
     return templates.TemplateResponse(
         "two_factor.html",
         {"request": request, "error": "Неверный код 2FA"},
