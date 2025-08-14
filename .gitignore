@@ -229,6 +229,7 @@ nginx/ssl/*
 *.log
 certbot.log
 
-# Скрипты обновления
+# Файлы созданные deploy.sh
 renew-cert.sh
+get-docker.sh
 
