@@ -104,10 +104,22 @@ def verify_totp(token: str, username: str = "admin", secret: str | None = None) 
         if secret is None:
             secret = get_user_secret(username, generate_if_missing=False)
         
+        print(f"🔐 TOTP Debug:")
+        print(f"   Token: {token}")
+        print(f"   Secret: {secret}")
+        print(f"   Username: {username}")
+        
         totp = pyotp.TOTP(secret)
-        result = totp.verify(token)
+        
+        # Проверяем с расширенным окном времени (±2 периода = ±60 секунд)
+        result = totp.verify(token, valid_window=2)
+        
+        print(f"   Current server code: {totp.now()}")
+        print(f"   Verification result: {result}")
+        
         return result
-    except Exception:
+    except Exception as e:
+        print(f"❌ TOTP Error: {e}")
         return False
 
 def two_factor_handler(request: Request, token: str = Form(...)):
@@ -116,18 +128,27 @@ def two_factor_handler(request: Request, token: str = Form(...)):
 
     user_secret = request.cookies.get("user_totp_secret")
     
-    if user_secret:
-        if verify_totp(token, username, user_secret):
-            response = RedirectResponse(url="/setup-session", status_code=303)
-            set_secure_cookie(response, request, "2fa_verified", "true")
-            return response
-    else:
-        # Пробуем персональный секрет пользователя
-        if verify_totp(token, username):
-            response = RedirectResponse(url="/setup-session", status_code=303)
-            set_secure_cookie(response, request, "2fa_verified", "true")
-            return response
+    print(f"🍪 2FA Handler Debug:")
+    print(f"   Token from form: {token}")
+    print(f"   User secret from cookie: {user_secret}")
     
+    # Всегда используем детерминистичный секрет для надежности
+    global_secret = get_user_secret(username)
+    print(f"   Global secret: {global_secret}")
+    
+    # Проверяем сначала cookie секрет, потом глобальный
+    if user_secret and verify_totp(token, username, user_secret):
+        print("✅ Verification successful with cookie secret")
+        response = RedirectResponse(url="/setup-session", status_code=303)
+        set_secure_cookie(response, request, "2fa_verified", "true")
+        return response
+    elif verify_totp(token, username, global_secret):
+        print("✅ Verification successful with global secret")
+        response = RedirectResponse(url="/setup-session", status_code=303)
+        set_secure_cookie(response, request, "2fa_verified", "true")
+        return response
+    
+    print("❌ Both verification attempts failed")
     return templates.TemplateResponse(
         "two_factor.html",
         {"request": request, "error": "Неверный код 2FA"},
