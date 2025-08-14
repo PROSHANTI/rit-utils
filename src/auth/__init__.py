@@ -22,6 +22,8 @@ from .two_factor import (
     get_user_secret
 )
 
+from .routes import setup_2fa_routes
+
 __all__ = [
     'security',
     'config', 
@@ -40,5 +42,6 @@ __all__ = [
     'clear_2fa_verification',
     'generate_qr_code',
     'get_totp_uri',
-    'get_user_secret'
+    'get_user_secret',
+    'setup_2fa_routes'
 ]

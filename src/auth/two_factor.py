@@ -10,9 +10,15 @@ from fastapi.templating import Jinja2Templates
 
 templates = Jinja2Templates(directory="templates")
 
-TOTP_SECRET = str(os.getenv('TOTP_SECRET'))
+# Получаем TOTP_SECRET из переменной окружения или используем дефолтное значение
+_totp_secret_env = os.getenv('TOTP_SECRET')
+if _totp_secret_env is None or _totp_secret_env == '':
+    # Используем дефолтное значение из README
+    TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+else:
+    TOTP_SECRET = str(_totp_secret_env)
 
-USER_SECRETS = {}
+USER_SECRETS: dict[str, str] = {}
 
 def generate_totp_secret() -> str:
     """Генерирует новый секретный ключ для TOTP"""
@@ -38,6 +44,7 @@ def get_user_secret(username: str, generate_if_missing: bool = True) -> str:
             USER_SECRETS[username] = secret
         else:
             return TOTP_SECRET
+    
     return USER_SECRETS[username]
 
 def get_totp_uri(username: str, secret: str | None = None) -> str:
@@ -102,11 +109,10 @@ def verify_totp(token: str, username: str = "admin", secret: str | None = None) 
 
 def two_factor_handler(request: Request, token: str = Form(...)):
     """Обработчик 2FA"""
-    # Используем admin для всех пользователей (простое приложение)
     username = "admin"
-    
-    # Получаем секрет из cookies или используем персональный секрет пользователя
+
     user_secret = request.cookies.get("user_totp_secret")
+    
     if user_secret:
         if verify_totp(token, username, user_secret):
             response = RedirectResponse(url="/setup-session", status_code=303)

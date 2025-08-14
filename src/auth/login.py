@@ -85,12 +85,14 @@ def logout_handler(request: Request):
         httponly=True,
         samesite="strict"
     )
-    # Очищаем 2FA cookies
     response.delete_cookie(
         "2fa_verified", httponly=True, secure=True, samesite="strict"
         )
     response.delete_cookie(
         "auth_pending", httponly=True, secure=True, samesite="strict"
+        )
+    response.delete_cookie(
+        "user_totp_secret", httponly=True, secure=True, samesite="strict"
         )
     return response
 

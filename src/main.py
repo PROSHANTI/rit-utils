@@ -1,14 +1,11 @@
-import os
 import datetime
 import base64
 
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
-
 
 from src.auth import (
     get_auth_dependency,
@@ -17,15 +14,11 @@ from src.auth import (
     refresh_token_handler,
     jwt_decode_exception_handler,
     check_auth_status,
-    setup_2fa_session,
-    two_factor_handler,
-    show_two_factor_page,
-    generate_qr_code,
-    get_totp_uri,
-    get_user_secret,
+    setup_2fa_routes,
     JWTDecodeError
 )
 from src.utils.email_handler import send_email_handler
+from src.utils.doctor_form_handler import doctor_form_handler
 
 
 load_dotenv()
@@ -36,6 +29,7 @@ dependencies = [get_auth_dependency()]
 
 # FastAPI app
 app = FastAPI()
+setup_2fa_routes(app)
 app.mount("/static", StaticFiles(directory="templates"), name="static")
 templates = Jinja2Templates(directory="templates")
 app.add_exception_handler(JWTDecodeError, jwt_decode_exception_handler)
@@ -60,77 +54,6 @@ def logout(request: Request):
 def refresh_token(request: Request):
     return refresh_token_handler(request)
 
-@app.get("/2fa", tags=['2FA'], summary='Страница двухфакторной аутентификации')
-def two_factor_page(request: Request):
-    return show_two_factor_page(request)
-
-@app.post("/2fa", tags=['2FA'], summary='Проверка кода 2FA')
-def two_factor_verify(request: Request, token: str = Form(...)):
-    return two_factor_handler(request, token)
-
-@app.get("/setup-session", tags=['2FA'], summary='Настройка сессии после 2FA')
-def setup_session(request: Request):
-    return setup_2fa_session(request)
-
-@app.get("/setup-2fa", 
-         dependencies=dependencies,
-         tags=['2FA'], 
-         summary='Страница настройки 2FA')
-def setup_2fa_page(request: Request):
-    username = "admin"
-    user_secret = get_user_secret(username)
-    uri = get_totp_uri(username) 
-    qr_code = generate_qr_code(uri)
-    
-    return templates.TemplateResponse(
-        "setup_2fa.html",
-        {
-            "request": request,
-            "qr_code": qr_code,
-            "manual_code": user_secret
-        }
-    )
-
-@app.get("/configure-2fa", 
-         tags=['2FA'], 
-         summary='Страница настройки 2FA (доступна после входа)')
-def configure_2fa_page(request: Request):
-    if not request.cookies.get("auth_pending"):
-        return RedirectResponse(url="/", status_code=303)
-    
-    username = str(os.getenv('USERNAME'))
-    user_secret = get_user_secret(username)
-    uri = get_totp_uri(username)
-    qr_code = generate_qr_code(uri)
-    
-    response = templates.TemplateResponse(
-        "setup_2fa.html",
-        {
-            "request": request,
-            "qr_code": qr_code,
-            "manual_code": user_secret
-        }
-    )
-    
-    response.set_cookie(
-        key="user_totp_secret",
-        value=user_secret,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        max_age=300  # 5 минут
-    )
-    
-    response.set_cookie(
-        key="2fa_configured",
-        value="true",
-        httponly=True,
-        secure=True,
-        samesite="strict"
-        
-    )
-    
-    return response
 
 @app.get("/", 
          tags=['Главная страница'], 
@@ -204,10 +127,53 @@ def gen_rit_cert(request: Request):
 @app.get("/doctor_form",
          dependencies=dependencies,
          tags=['Генерация карточек'],
+         summary='Страница генерации карточек клиентов'
+         )
+def doctor_form_page(request: Request):
+    encoded_status = request.cookies.get("doctor_form_status")
+    status = None
+    if encoded_status:
+        try:
+            status = base64.b64decode(encoded_status.encode('ascii')).decode('utf-8')
+        except Exception as e: 
+            status = f"Ошибка декодирования статуса, {e}"
+    
+    response = templates.TemplateResponse(
+        "doctor_form.html", {"request": request, "status": status}
+        )
+    if encoded_status:
+        response.delete_cookie("doctor_form_status")
+    return response
+
+@app.post("/doctor_form",
+         dependencies=dependencies,
+         tags=['Генерация карточек'],
          summary='Сгенерировать карточки клиентов'
          )
-def doctor_form(request: Request):
-    return templates.TemplateResponse("doctor_form.html", {"request": request})
+def doctor_form_endpoint(
+    request: Request,
+    doctor_1: str | None = Form(None),
+    doctor_2: str | None = Form(None), 
+    doctor_3: str | None = Form(None),
+    doctor_4: str | None = Form(None),
+    patient_1: str | None = Form(None),
+    patient_2: str | None = Form(None),
+    patient_3: str | None = Form(None),
+    patient_4: str | None = Form(None),
+    date: str | None = Form(None)
+):
+    return doctor_form_handler(
+        request=request,
+        doctor_1=doctor_1,
+        doctor_2=doctor_2,
+        doctor_3=doctor_3,
+        doctor_4=doctor_4,
+        patient_1=patient_1,
+        patient_2=patient_2,
+        patient_3=patient_3,
+        patient_4=patient_4,
+        date=date
+    )
 
 
 if __name__ == "__main__":

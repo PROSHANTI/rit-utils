@@ -8,6 +8,10 @@ __pycache__/
 
 # Files
 src/utils/email_templates.py
+src/utils/Бланк врача на печать.pptx
+src/utils/Бланк Врача.pptx
+src/utils/AmericanTypewriter.ttc
+
 
 # Distribution / packaging
 .Python
