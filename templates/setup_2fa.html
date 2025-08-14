@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS - Настройка 2FA</title>
+    <link rel="stylesheet" href="/static/css/style_login.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-title">
+            <i class="fas fa-qrcode"></i>
+            Настройка двухфакторной аутентификации
+        </div>
+        
+        <div class="setup-subtitle">
+            Отсканируйте QR-код в приложении аутентификации
+        </div>
+        
+        <div class="instructions">
+            <h4><i class="fas fa-info-circle"></i> Инструкции:</h4>
+            <ol>
+                <li>Установите приложение аутентификации (Google Authenticator, Authy, Microsoft Authenticator)</li>
+                <li>Отсканируйте QR-код или введите код вручную</li>
+                <li>Введите полученный 6-значный код для подтверждения</li>
+            </ol>
+        </div>
+        
+        <div class="qr-code-container">
+            <h4>QR-код для сканирования:</h4>
+            <img src="data:image/png;base64,{{ qr_code }}" alt="QR Code" class="qr-code">
+        </div>
+        
+        <div class="manual-code">
+            <strong>Код для ручного ввода:</strong><br>
+            {{ manual_code }}
+        </div>
+        
+        <div class="button-group">
+            <a href="/2fa" class="btn">
+                <i class="fas fa-check"></i>
+                Ввести код 2FA
+            </a>
+            <a href="/" class="btn btn-secondary">
+                <i class="fas fa-times"></i>
+                Отмена
+            </a>
+        </div>
+    </div>
+</body>
+</html>

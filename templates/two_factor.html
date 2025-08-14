@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS - 2FA</title>
+    <link rel="stylesheet" href="/static/css/style_login.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="two-factor-container">
+        <div class="two-factor-title">
+            <i class="fas fa-shield-alt"></i>
+            Двухфакторная аутентификация
+        </div>
+        
+        <div class="two-factor-subtitle">
+            Введите код из приложения аутентификации
+        </div>
+        
+        {% if error %}
+        <div class="error-message">
+            <i class="fas fa-exclamation-triangle"></i>
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/2fa">
+            <div class="form-group">
+                <label for="token">Код 2FA</label>
+                <input 
+                    type="text" 
+                    id="token" 
+                    name="token" 
+                    placeholder="000000" 
+                    maxlength="6" 
+                    pattern="[0-9]{6}" 
+                    required
+                    autocomplete="off"
+                    autofocus
+                >
+            </div>
+            
+            <button type="submit">
+                <i class="fas fa-check"></i>
+                Подтвердить
+            </button>
+        </form>
+        
+        <div class="back-link">
+            <a href="/">
+                <i class="fas fa-arrow-left"></i>
+                Вернуться к входу
+            </a>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('token').addEventListener('input', function(e) {
+            if (this.value.length === 6) {
+                this.form.submit();
+            }
+        });
+        document.getElementById('token').addEventListener('keypress', function(e) {
+            if (!/[0-9]/.test(e.key)) {
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>

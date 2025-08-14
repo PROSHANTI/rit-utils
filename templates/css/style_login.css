@@ -1,0 +1,298 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #0a0a0a;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    background-image: radial-gradient(circle at 10% 20%, rgba(80,0,0,0.8) 0%, rgba(20,0,0,0.9) 90%);
+}
+
+.login-container {
+    width: 100%;
+    max-width: 400px;
+    background: rgba(30, 30, 30, 0.8);
+    border-radius: 15px;
+    padding: 30px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+h1 {
+    text-align: center;
+    font-size: 2.5rem;
+    margin-bottom: 30px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #ccc;
+}
+
+input {
+    width: 100%;
+    padding: 12px 15px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: rgba(20, 20, 20, 0.7);
+    color: #fff;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+input:focus {
+    outline: none;
+    border-color: #ff416c;
+    box-shadow: 0 0 0 3px rgba(255, 65, 108, 0.3);
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(45deg, #ff416c, #ff4b2b);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(255, 75, 43, 0.4);
+}
+
+.logo {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.logo span {
+    font-size: 2.8rem;
+    font-weight: 800;
+    background: linear-gradient(45deg, #ff416c, #ff4b2b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 2px 10px rgba(255, 75, 43, 0.2);
+}
+
+.error-message {
+    color: #ff6b6b;
+    margin-top: 8px;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+/* ===== СТИЛИ ДЛЯ 2FA ===== */
+
+/* Контейнеры для 2FA страниц */
+.two-factor-container,
+.setup-container {
+    width: 100%;
+    max-width: 400px;
+    background: rgba(30, 30, 30, 0.8);
+    border-radius: 15px;
+    padding: 30px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setup-container {
+    max-width: 500px;
+}
+
+/* Заголовки 2FA */
+.two-factor-title,
+.setup-title {
+    text-align: center;
+    color: #fff;
+    margin-bottom: 20px;
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+/* Подзаголовки 2FA */
+.two-factor-subtitle,
+.setup-subtitle {
+    text-align: center;
+    color: #ccc;
+    margin-bottom: 30px;
+    font-size: 1rem;
+}
+
+/* Контейнер QR-кода */
+.qr-code-container {
+    text-align: center;
+    margin: 20px 0;
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(20, 20, 20, 0.5);
+}
+
+/* QR-код */
+.qr-code {
+    max-width: 200px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+}
+
+/* Ручной код */
+.manual-code {
+    background: rgba(20, 20, 20, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    font-family: monospace;
+    text-align: center;
+    margin: 15px 0;
+    word-break: break-all;
+    font-size: 12px;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Инструкции */
+.instructions {
+    background: rgba(255, 65, 108, 0.1);
+    padding: 15px;
+    border-radius: 8px;
+    margin: 20px 0;
+    border-left: 4px solid #ff416c;
+}
+
+.instructions h4 {
+    margin: 0 0 10px 0;
+    color: #ff416c;
+}
+
+.instructions ol {
+    margin: 0;
+    padding-left: 20px;
+    color: #ccc;
+}
+
+.instructions li {
+    margin-bottom: 5px;
+}
+
+/* Кнопки */
+.btn {
+    display: inline-block;
+    padding: 12px 24px;
+    background: linear-gradient(45deg, #ff416c, #ff4b2b);
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(255, 75, 43, 0.4);
+}
+
+.btn-secondary {
+    background: linear-gradient(45deg, #6c757d, #545b62);
+}
+
+.btn-secondary:hover {
+    box-shadow: 0 5px 15px rgba(108, 117, 125, 0.4);
+}
+
+/* Группа кнопок */
+.button-group {
+    text-align: center;
+    margin-top: 30px;
+}
+
+.button-group .btn {
+    margin: 0 10px;
+}
+
+/* Сообщения об ошибках 2FA */
+.error-message {
+    color: #ff6b6b;
+    text-align: center;
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+}
+
+/* Ссылка назад */
+.back-link {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.back-link a {
+    color: #ff416c;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.back-link a:hover {
+    color: #ff4b2b;
+}
+
+/* Специальные стили для поля ввода кода 2FA */
+.two-factor-container .form-group input[type="text"] {
+    text-align: center;
+    letter-spacing: 4px;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.two-factor-container .form-group input[type="text"]::placeholder {
+    color: #666;
+    letter-spacing: 2px;
+}
+
+/* Адаптивность */
+@media (max-width: 480px) {
+    .login-container,
+    .two-factor-container,
+    .setup-container {
+        padding: 20px;
+    }
+    
+    h1 {
+        font-size: 2rem;
+    }
+    
+    .two-factor-title,
+    .setup-title {
+        font-size: 1.5rem;
+    }
+    
+    .button-group .btn {
+        margin: 5px;
+        display: block;
+        width: 100%;
+    }
+}

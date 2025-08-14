@@ -19,7 +19,7 @@ function setupTokenRefresh() {
     setInterval(checkAndRefreshToken, 10 * 60 * 1000);
     const originalFetch = window.fetch;
     window.fetch = async function(url, options = {}) {
-        const response = await originalFetch(url, options);
+        const response = await originalFetch(url, options);``
         if (response.status === 401) {
             const refreshed = await checkAndRefreshToken();
             if (refreshed) {
