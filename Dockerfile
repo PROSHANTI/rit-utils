@@ -30,9 +30,9 @@ ENV PYTHONUNBUFFERED=1
 # Копирование файлов зависимостей
 COPY pyproject.toml poetry.lock ./
 
-# Установка зависимостей
+# Установка зависимостей (без установки самого проекта)
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi
+    poetry install --no-interaction --no-ansi --no-root
 
 # Копирование исходного кода
 COPY . .
