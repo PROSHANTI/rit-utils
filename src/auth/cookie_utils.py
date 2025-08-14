@@ -1,4 +1,4 @@
-"""Утилиты для работы с cookie с автоматической адаптацией к HTTP/HTTPS"""
+"""Утилиты для работы с secure cookies для HTTPS"""
 
 from fastapi import Request
 from fastapi.responses import Response
@@ -6,26 +6,19 @@ from fastapi.responses import Response
 
 def get_cookie_settings(request: Request) -> dict:
     """
-    Возвращает настройки cookie в зависимости от протокола (HTTP/HTTPS)
+    Возвращает настройки cookie для HTTPS (secure cookies)
     
     Args:
         request: FastAPI Request объект
         
     Returns:
-        dict: Настройки для cookie (secure, samesite)
+        dict: Настройки для cookie (secure, samesite, httponly)
     """
-    # Проверяем протокол
-    is_secure = request.url.scheme == "https"
-    
-    # Также проверяем заголовки от reverse proxy (nginx)
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
-    if forwarded_proto == "https":
-        is_secure = True
-    
+    # Приложение работает только на HTTPS в продакшене
     return {
-        "secure": is_secure,
-        "samesite": "strict" if is_secure else "lax",
-        "httponly": True
+        "secure": True,      # Всегда secure для HTTPS
+        "samesite": "strict", # Максимальная безопасность
+        "httponly": True     # Защита от XSS
     }
 
 
