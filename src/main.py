@@ -17,8 +17,9 @@ from src.auth import (
     setup_2fa_routes,
     JWTDecodeError
 )
-from src.utils.email_handler import send_email_handler
-from src.utils.doctor_form_handler import doctor_form_handler
+from src.utils.send_email.email_handler import send_email_handler
+from src.utils.doctor_form.doctor_form_handler import doctor_form_handler
+from src.utils.gen_cert.gen_cert_handler import gen_cert_handler
 
 
 load_dotenv()
@@ -117,12 +118,39 @@ def send_email_endpoint(
 @app.get("/gen_rit_cert",
          dependencies=dependencies,
          tags=['Генерация сертификата'],
+         summary='Страница генерации подарочного сертификата'
+         )
+def gen_rit_cert_page(request: Request):
+    encoded_status = request.cookies.get("gen_cert_status")
+    status = None
+    if encoded_status:
+        try:
+            status = base64.b64decode(encoded_status.encode('ascii')).decode('utf-8')
+        except Exception as e: 
+            status = f"Ошибка декодирования статуса, {e}"
+    
+    response = templates.TemplateResponse(
+        "gen_rit_cert.html", {"request": request, "status": status}
+        )
+    if encoded_status:
+        response.delete_cookie("gen_cert_status")
+    return response
+
+@app.post("/gen_rit_cert",
+         dependencies=dependencies,
+         tags=['Генерация сертификата'],
          summary='Сгенерировать подарочный сертификат'
          )
-def gen_rit_cert(request: Request):
-        return templates.TemplateResponse(
-        "gen_rit_cert.html", {"request": request}
-        )
+def gen_rit_cert_endpoint(
+    request: Request,
+    name: str | None = Form(None),
+    price: str | None = Form(None)
+):
+    return gen_cert_handler(
+        request=request,
+        name=name,
+        price=price
+    )
 
 @app.get("/doctor_form",
          dependencies=dependencies,

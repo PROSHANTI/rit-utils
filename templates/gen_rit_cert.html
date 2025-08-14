@@ -12,25 +12,22 @@
         <div class="logo">
             <span>GEN CERT</span>
         </div>
-        <form action="/ge" method="post" enctype="multipart/form-data" autocomplete="off">
+        <form action="/gen_rit_cert" method="post" enctype="multipart/form-data" autocomplete="off">
             <div class="form-group">
                 <label for="name">ФИО</label>
                 <input type="text" id="name" name="name">
             </div>
             <div class="form-group">
                 <label for="price">СУММА</label>
-                <input type="text" id="price" name="price">
+                <input type="text" id="price" name="price" required>
             </div>
-            <div class="form-group">
-                <label for="sold">КОМУ</label>
-                <input type="text" id="sold" name="sold">
-            </div>
+
             {% if status %}
             <div class="form-group">
                 <p class="status-message">{{ status }}</p>
             </div>
             {% endif %}
-            <button type="submit">Отправить</button>
+            <button type="submit">Скачать</button>
         </form>
     </div>
 {% include 'footer.html' %}

@@ -7,7 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from fastapi import Form, UploadFile, File, Request
 from fastapi.responses import RedirectResponse
-from src.utils.email_templates import get_email_template
+from src.utils.send_email.email_templates import get_email_template
 
 
 SEND_FROM = os.getenv('SEND_FROM')

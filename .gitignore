@@ -7,10 +7,10 @@ __pycache__/
 *.so
 
 # Files
-src/utils/email_templates.py
-src/utils/Бланк врача на печать.pptx
-src/utils/Бланк Врача.pptx
-src/utils/AmericanTypewriter.ttc
+src/utils/send_email/email_templates.py
+src/utils/gen_cert/Сертификат_шаблон.pptx
+src/utils/doctor_form/Бланк врача на печать.pptx
+src/utils/doctor_form/Бланк Врача.pptx
 
 
 # Distribution / packaging

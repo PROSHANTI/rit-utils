@@ -1,6 +1,13 @@
 # Базовый образ Python 3.13
 FROM python:3.13-slim
 
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    fonts-liberation \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Установка Poetry
 RUN pip install poetry
 

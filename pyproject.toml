@@ -20,6 +20,15 @@ Pillow = "^10.1.0"
 types-qrcode = "^8.2.0.20250506"
 python-pptx = "^0.6.23"
 
+# System dependencies required (install separately):
+# LibreOffice для конвертации PPTX в PDF
+# Ubuntu/Debian: sudo apt-get install libreoffice
+# CentOS/RHEL: sudo yum install libreoffice  
+# macOS: brew install --cask libreoffice
+# Windows: Download from https://www.libreoffice.org/
+
+[tool.poetry.scripts]
+check-deps = "scripts.check_dependencies:main"
 
 [build-system]
 requires = ["poetry-core"]
