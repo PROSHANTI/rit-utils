@@ -214,3 +214,21 @@ marimo/_lsp/
 __marimo__/
 .DS_Store
 .vscode/settings.json
+
+# Nginx
+nginx/logs/*
+!nginx/logs/.gitkeep
+nginx/ssl/*
+!nginx/ssl/.gitkeep
+
+# SSL сертификаты
+*.pem
+*.key
+
+# Логи
+*.log
+certbot.log
+
+# Скрипты обновления
+renew-cert.sh
+
