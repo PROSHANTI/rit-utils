@@ -8,15 +8,17 @@ from fastapi import Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+import src.config  # noqa: F401
+
 templates = Jinja2Templates(directory="templates")
 
-# Получаем TOTP_SECRET из переменной окружения или используем дефолтное значение
-_totp_secret_env = os.getenv('TOTP_SECRET')
-if _totp_secret_env is None or _totp_secret_env == '':
-    # Используем дефолтное значение из README
-    TOTP_SECRET = "JBSWY3DPEHPK3PXP"
-else:
-    TOTP_SECRET = str(_totp_secret_env)
+TOTP_SECRET = os.getenv('TOTP_SECRET')
+if not TOTP_SECRET:
+    raise ValueError(
+        "TOTP_SECRET не задан в переменных окружения. "
+        "Добавьте TOTP_SECRET в .env файл. "
+        "Сгенерировать секрет: python -c 'import pyotp; print(pyotp.random_base32())'"
+    )
 
 USER_SECRETS: dict[str, str] = {}
 
@@ -43,7 +45,7 @@ def get_user_secret(username: str, generate_if_missing: bool = True) -> str:
             secret = base64.b32encode(hash_bytes[:20]).decode()
             USER_SECRETS[username] = secret
         else:
-            return TOTP_SECRET
+            return TOTP_SECRET or ""
     
     return USER_SECRETS[username]
 

@@ -5,7 +5,8 @@ import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from dotenv import load_dotenv
+
+import src.config  # noqa: F401
 
 from src.auth import (
     get_auth_dependency,
@@ -20,9 +21,6 @@ from src.auth import (
 from src.utils.send_email.email_handler import send_email_handler
 from src.utils.doctor_form.doctor_form_handler import doctor_form_handler
 from src.utils.gen_cert.gen_cert_handler import gen_cert_handler
-
-
-load_dotenv()
 
 
 date_now = datetime.datetime.now().strftime("%d.%m.%y")
@@ -205,5 +203,5 @@ def doctor_form_endpoint(
 
 
 if __name__ == "__main__":
-    uvicorn.run("src.main:app", reload=True)
+    uvicorn.run("src.main:app", reload=True, host="0.0.0.0", port=8000)
 
