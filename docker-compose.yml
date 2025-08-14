@@ -16,8 +16,6 @@ services:
       - ./src/utils/send_email:/app/src/utils/send_email
     networks:
       - rit-utils-network
-    depends_on:
-      - nginx
 
   # Nginx reverse proxy
   nginx:
