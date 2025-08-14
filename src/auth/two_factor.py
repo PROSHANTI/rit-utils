@@ -7,7 +7,7 @@ from io import BytesIO
 from fastapi import Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
+from .cookie_utils import set_secure_cookie
 
 import src.config  # noqa: F401
 
@@ -80,7 +80,7 @@ def generate_qr_code(uri: str) -> str:
         
         img = qr.make_image(fill_color="black", back_color="white")
         buffer = BytesIO()
-        img.save(buffer, "PNG")  # Убираем параметр format=
+        img.save(buffer, "PNG")
         buffer.seek(0)
         
         qr_base64 = base64.b64encode(buffer.getvalue()).decode()
@@ -104,59 +104,40 @@ def verify_totp(token: str, username: str = "admin", secret: str | None = None) 
         if secret is None:
             secret = get_user_secret(username, generate_if_missing=False)
         
-        import logging
-        logging.info(f"🔐 TOTP Debug:")
-        logging.info(f"   Token: {token}")
-        logging.info(f"   Secret: {secret}")
-        logging.info(f"   Username: {username}")
-        
         totp = pyotp.TOTP(secret)
+        verification_result = totp.verify(token, valid_window=40)
         
-        # Проверяем с расширенным окном времени (±2 периода = ±60 секунд)
-        result = totp.verify(token, valid_window=2)
+        if not verification_result:
+            import time
+            current_time = int(time.time())
+            
+            for hour_offset in range(-12, 13):
+                offset_time = current_time + (hour_offset * 3600)
+                code_at_offset = totp.at(offset_time)
+                if code_at_offset == token:
+                    verification_result = True
+                    break
         
-        logging.info(f"   Current server code: {totp.now()}")
-        logging.info(f"   Verification result: {result}")
-        
-        # Также выводим в stdout для Docker
-        print(f"🔐 TOTP: token={token}, secret={secret[:8]}..., result={result}, server_code={totp.now()}", flush=True)
-        
-        return result
-    except Exception as e:
-        import logging
-        logging.error(f"❌ TOTP Error: {e}")
-        print(f"❌ TOTP Exception: {e}", flush=True)
+        return verification_result
+    except Exception:
         return False
 
 def two_factor_handler(request: Request, token: str = Form(...)):
     """Обработчик 2FA"""
     username = "admin"
 
-    # ВРЕМЕННЫЙ DEBUG - пропускаем 2FA если токен = "debug"
-    if token == "debug":
-        response = RedirectResponse(url="/setup-session", status_code=303)
-        set_secure_cookie(response, request, "2fa_verified", "true")
-        return response
-
-    user_secret = request.cookies.get("user_totp_secret")
-    
-    # Всегда используем детерминистичный секрет для надежности
     global_secret = get_user_secret(username)
     
-    # Создаем TOTP для проверки
     totp = pyotp.TOTP(global_secret)
     
-    # Проверяем с ОЧЕНЬ большим окном времени (±20 минут для разных часовых поясов)
     verification_result = totp.verify(token, valid_window=40)
     
-    # Если стандартная проверка не прошла, пробуем с разными временными сдвигами
     if not verification_result:
         import time
         current_time = int(time.time())
         
-        # Проверяем с разными сдвигами времени (от -12 до +12 часов)
         for hour_offset in range(-12, 13):
-            offset_time = current_time + (hour_offset * 3600)  # сдвиг в секундах
+            offset_time = current_time + (hour_offset * 3600)
             code_at_offset = totp.at(offset_time)
             if code_at_offset == token:
                 verification_result = True

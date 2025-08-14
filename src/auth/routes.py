@@ -2,7 +2,7 @@ from fastapi import Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from .login import get_auth_dependency, setup_2fa_session
-from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
+from .cookie_utils import set_secure_cookie
 from .two_factor import (
     two_factor_handler,
     show_two_factor_page,

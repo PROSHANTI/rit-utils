@@ -27,7 +27,7 @@ date_now = datetime.datetime.now().strftime("%d.%m.%y")
 dependencies = [get_auth_dependency()]
 
 # FastAPI app
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None)
 setup_2fa_routes(app)
 app.mount("/static", StaticFiles(directory="templates"), name="static")
 templates = Jinja2Templates(directory="templates")

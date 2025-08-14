@@ -229,7 +229,9 @@ nginx/ssl/*
 *.log
 certbot.log
 
-# Файлы созданные deploy.sh
+# Файлы созданные скриптами
 renew-cert.sh
 get-docker.sh
+webhook-server.py
+*.service
 

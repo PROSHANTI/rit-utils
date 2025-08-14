@@ -6,7 +6,7 @@ from fastapi import Request, Form, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from authx import AuthX, AuthXConfig
-from .cookie_utils import set_secure_cookie, delete_secure_cookie, get_cookie_settings
+from .cookie_utils import set_secure_cookie, delete_secure_cookie
 from authx.exceptions import JWTDecodeError
 from dotenv import load_dotenv
 from .two_factor import is_2fa_verified
