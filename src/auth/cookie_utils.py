@@ -17,7 +17,7 @@ def get_cookie_settings(request: Request) -> dict:
     # Приложение работает только на HTTPS в продакшене
     return {
         "secure": True,      # Всегда secure для HTTPS
-        "samesite": "strict", # Максимальная безопасность
+        "samesite": "lax",   # Более мягкие ограничения для лучшей совместимости
         "httponly": True     # Защита от XSS
     }
 
