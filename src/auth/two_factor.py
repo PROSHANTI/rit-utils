@@ -104,22 +104,28 @@ def verify_totp(token: str, username: str = "admin", secret: str | None = None) 
         if secret is None:
             secret = get_user_secret(username, generate_if_missing=False)
         
-        print(f"🔐 TOTP Debug:")
-        print(f"   Token: {token}")
-        print(f"   Secret: {secret}")
-        print(f"   Username: {username}")
+        import logging
+        logging.info(f"🔐 TOTP Debug:")
+        logging.info(f"   Token: {token}")
+        logging.info(f"   Secret: {secret}")
+        logging.info(f"   Username: {username}")
         
         totp = pyotp.TOTP(secret)
         
         # Проверяем с расширенным окном времени (±2 периода = ±60 секунд)
         result = totp.verify(token, valid_window=2)
         
-        print(f"   Current server code: {totp.now()}")
-        print(f"   Verification result: {result}")
+        logging.info(f"   Current server code: {totp.now()}")
+        logging.info(f"   Verification result: {result}")
+        
+        # Также выводим в stdout для Docker
+        print(f"🔐 TOTP: token={token}, secret={secret[:8]}..., result={result}, server_code={totp.now()}", flush=True)
         
         return result
     except Exception as e:
-        print(f"❌ TOTP Error: {e}")
+        import logging
+        logging.error(f"❌ TOTP Error: {e}")
+        print(f"❌ TOTP Exception: {e}", flush=True)
         return False
 
 def two_factor_handler(request: Request, token: str = Form(...)):
@@ -128,27 +134,35 @@ def two_factor_handler(request: Request, token: str = Form(...)):
 
     user_secret = request.cookies.get("user_totp_secret")
     
-    print(f"🍪 2FA Handler Debug:")
-    print(f"   Token from form: {token}")
-    print(f"   User secret from cookie: {user_secret}")
+    import logging
+    logging.info(f"🍪 2FA Handler Debug:")
+    logging.info(f"   Token from form: {token}")
+    logging.info(f"   User secret from cookie: {user_secret}")
+    
+    # Также выводим в stdout для Docker
+    print(f"🍪 2FA Handler: token={token}, cookie_secret={user_secret[:8] if user_secret else 'None'}...", flush=True)
     
     # Всегда используем детерминистичный секрет для надежности
     global_secret = get_user_secret(username)
-    print(f"   Global secret: {global_secret}")
+    logging.info(f"   Global secret: {global_secret}")
+    print(f"🔑 Global secret: {global_secret[:8]}...", flush=True)
     
     # Проверяем сначала cookie секрет, потом глобальный
     if user_secret and verify_totp(token, username, user_secret):
-        print("✅ Verification successful with cookie secret")
+        logging.info("✅ Verification successful with cookie secret")
+        print("✅ SUCCESS: Cookie secret worked", flush=True)
         response = RedirectResponse(url="/setup-session", status_code=303)
         set_secure_cookie(response, request, "2fa_verified", "true")
         return response
     elif verify_totp(token, username, global_secret):
-        print("✅ Verification successful with global secret")
+        logging.info("✅ Verification successful with global secret")
+        print("✅ SUCCESS: Global secret worked", flush=True)
         response = RedirectResponse(url="/setup-session", status_code=303)
         set_secure_cookie(response, request, "2fa_verified", "true")
         return response
     
-    print("❌ Both verification attempts failed")
+    logging.info("❌ Both verification attempts failed")
+    print("❌ FAIL: Both secrets failed", flush=True)
     return templates.TemplateResponse(
         "two_factor.html",
         {"request": request, "error": "Неверный код 2FA"},
