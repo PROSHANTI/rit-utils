@@ -30,6 +30,7 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       - ./nginx/logs:/var/log/nginx
+      - ./certbot-webroot:/var/www/certbot:ro
     networks:
       - rit-utils-network
     depends_on:
