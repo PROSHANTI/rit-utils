@@ -16,14 +16,13 @@ def get_random_number():
 def convert_pptx_to_pdf(pptx_path, pdf_path):
     """Конвертирует PPTX файл в PDF используя LibreOffice."""
     try:
-        # Проверяем наличие LibreOffice
         libreoffice_paths = [
-            'libreoffice',  # В PATH (стандартно для Ubuntu после apt install)
-            '/usr/bin/libreoffice',  # Ubuntu/Debian стандартный путь
-            '/usr/local/bin/libreoffice',  # Альтернативный путь Ubuntu
-            '/snap/bin/libreoffice',  # Ubuntu Snap пакет
-            '/opt/libreoffice/program/soffice',  # Ручная установка
-            '/Applications/LibreOffice.app/Contents/MacOS/soffice'  # macOS
+            'libreoffice',
+            '/usr/bin/libreoffice',
+            '/usr/local/bin/libreoffice',
+            '/snap/bin/libreoffice',
+            '/opt/libreoffice/program/soffice',
+            '/Applications/LibreOffice.app/Contents/MacOS/soffice'
         ]
         libreoffice_cmd = None
         
@@ -46,7 +45,6 @@ def convert_pptx_to_pdf(pptx_path, pdf_path):
                 "macOS: brew install --cask libreoffice"
             )
         
-        # Используем LibreOffice в headless режиме для конвертации
         cmd = [
             libreoffice_cmd,
             '--headless',
@@ -60,14 +58,13 @@ def convert_pptx_to_pdf(pptx_path, pdf_path):
         if result.returncode != 0:
             raise Exception(f"LibreOffice error: {result.stderr}")
             
-        # LibreOffice создает PDF с тем же именем, что и PPTX
+        
         base_name = os.path.splitext(os.path.basename(pptx_path))[0]
         generated_pdf = os.path.join(os.path.dirname(pdf_path), f"{base_name}.pdf")
         
         if not os.path.exists(generated_pdf):
             raise Exception("PDF файл не был создан")
             
-        # Переименовываем в нужное имя, если нужно
         if generated_pdf != pdf_path:
             os.rename(generated_pdf, pdf_path)
             
@@ -84,11 +81,9 @@ def gen_cert_handler(
 ):
     """Обработчик для генерации сертификатов"""
     try:
-        # Подготавливаем данные (все поля опциональны)
         name_value = name.strip() if name else ""
         price_value = price.strip() if price else ""
         
-        # Валидация цены только если она введена
         if price_value:
             if len(price_value) > 6:
                 raise ValueError("Цена слишком большая (максимум 999999)")
@@ -100,7 +95,6 @@ def gen_cert_handler(
             except ValueError:
                 raise ValueError("Цена должна быть числом")
         
-        # Путь к шаблону
         template_path = os.path.join(
             os.path.dirname(__file__), 
             'Сертификат_шаблон.pptx'
@@ -111,20 +105,16 @@ def gen_cert_handler(
                 f"Файл шаблона не найден: {template_path}"
             )
         
-        # Загружаем презентацию
         prs = Presentation(template_path)
         
-        # Генерируем случайный номер сертификата
         serial_number = get_random_number()
         
-        # Словарь замен
         replacements = {
             'price': price_value,
             'name': name_value,
             'serial': str(serial_number),
         }
         
-        # Заменяем плейсхолдеры в презентации
         for slide in prs.slides:
             for shape in slide.shapes:
                 if not shape.has_text_frame:
@@ -135,23 +125,18 @@ def gen_cert_handler(
                             if key in run.text:
                                 run.text = run.text.replace(key, value)
         
-        # Создаем временные файлы для PPTX и PDF
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as temp_pptx:
             temp_pptx_path = temp_pptx.name
         
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_pdf:
             temp_pdf_path = temp_pdf.name
         
-        # Сохраняем измененную презентацию
         prs.save(temp_pptx_path)
         
-        # Конвертируем PPTX в PDF
         convert_pptx_to_pdf(temp_pptx_path, temp_pdf_path)
         
-        # Имя файла для скачивания
         output_filename = "Сертификат.pdf"
         
-        # Функция для очистки временных файлов
         def cleanup_temp_files():
             try:
                 os.unlink(temp_pptx_path)
@@ -159,10 +144,8 @@ def gen_cert_handler(
             except OSError:
                 pass
         
-        # MIME тип для PDF файлов
         media_type = 'application/pdf'
         
-        # Настраиваем фоновую задачу для очистки
         background_tasks = BackgroundTasks()
         background_tasks.add_task(cleanup_temp_files)
         
@@ -174,7 +157,6 @@ def gen_cert_handler(
         )
         
     except Exception as e:
-        # В случае ошибки перенаправляем обратно на форму с сообщением об ошибке
         status = f"Ошибка генерации сертификата: {str(e)}"
         response = RedirectResponse(url="/gen_rit_cert", status_code=303)
         encoded_status = base64.b64encode(status.encode('utf-8')).decode('ascii')

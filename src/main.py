@@ -34,22 +34,25 @@ templates = Jinja2Templates(directory="templates")
 app.add_exception_handler(JWTDecodeError, jwt_decode_exception_handler)
 
 
-@app.post("/login",
-          summary='Авторизация',
+@app.post("/login", 
+          summary='Авторизация', 
           tags=['Авторизация']
           )
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     return login_handler(request, username, password)
     
-@app.post("/logout",
-          dependencies=dependencies,
+@app.post("/logout", 
+          dependencies=dependencies, 
           summary='Выйти из системы',
           tags=['Выход из системы']
           )
 def logout(request: Request):
     return logout_handler(request)
 
-@app.post("/refresh", tags=['Авторизация'], summary='Обновить токен доступа')
+@app.post("/refresh", 
+          tags=['Авторизация'], 
+          summary='Обновить токен доступа'
+          )
 def refresh_token(request: Request):
     return refresh_token_handler(request)
 

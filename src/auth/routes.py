@@ -18,15 +18,24 @@ dependencies = [get_auth_dependency()]
 def setup_2fa_routes(app):
     """Настройка всех маршрутов связанных с 2FA"""
     
-    @app.get("/2fa", tags=['2FA'], summary='Страница двухфакторной аутентификации')
+    @app.get("/2fa",
+             tags=['2FA'], 
+             summary='Страница двухфакторной аутентификации'
+             )
     def two_factor_page(request: Request):
         return show_two_factor_page(request)
 
-    @app.post("/2fa", tags=['2FA'], summary='Проверка кода 2FA')
+    @app.post("/2fa",
+              tags=['2FA'],
+              summary='Проверка кода 2FA'
+              )
     def two_factor_verify(request: Request, token: str = Form(...)):
         return two_factor_handler(request, token)
 
-    @app.get("/setup-session", tags=['2FA'], summary='Настройка сессии после 2FA')
+    @app.get("/setup-session",
+             tags=['2FA'],
+             summary='Настройка сессии после 2FA'
+             )
     def setup_session(request: Request):
         return setup_2fa_session(request)
 
@@ -70,8 +79,12 @@ def setup_2fa_routes(app):
             }
         )
         
-        set_secure_cookie(response, request, "user_totp_secret", user_secret, max_age=300)
+        set_secure_cookie(
+            response, request, "user_totp_secret", user_secret, max_age=300
+            )
         
-        set_secure_cookie(response, request, "2fa_configured", "true")
+        set_secure_cookie(
+            response, request, "2fa_configured", "true"
+            )
         
         return response
