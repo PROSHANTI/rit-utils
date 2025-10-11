@@ -35,7 +35,7 @@ check_command() {
 # Проверка системных требований
 check_requirements() {
     info "Проверка системных требований..."
-    
+
     # Проверка Docker
     if ! check_command docker; then
         warning "Установка Docker..."
@@ -44,6 +44,9 @@ check_requirements() {
         sudo usermod -aG docker $USER
         rm get-docker.sh
         success "Docker установлен"
+        warning "Для применения прав Docker необходим перезапуск сессии"
+        warning "Запустите: newgrp docker && ./deploy.sh"
+        exit 0
     fi
 
     # Проверка Docker Compose
@@ -72,7 +75,7 @@ get_user_settings() {
     echo ""
     info "Настройка проекта"
     echo "=================="
-    
+
     # Домен или IP
     echo ""
     echo -e "${BLUE}Введите ваш домен или оставьте пустым для использования только IP:${NC}"
@@ -80,14 +83,14 @@ get_user_settings() {
     echo "  - myapp.ru (для HTTPS)"
     echo "  - оставить пустым (только HTTP по IP)"
     read -p "Домен: " DOMAIN
-    
+
     if [ -z "$DOMAIN" ]; then
         USE_HTTPS=false
         info "Будет настроен HTTP по IP адресу"
     else
         USE_HTTPS=true
         info "Будет настроен HTTPS для домена: $DOMAIN"
-        
+
         # Email для Let's Encrypt
         echo -e "${BLUE}Введите email для Let's Encrypt:${NC}"
         read -p "Email: " SSL_EMAIL
@@ -95,7 +98,7 @@ get_user_settings() {
             SSL_EMAIL="admin@$DOMAIN"
         fi
     fi
-    
+
     # Получение IP адреса сервера
     SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "YOUR_SERVER_IP")
     if [ "$SERVER_IP" = "YOUR_SERVER_IP" ]; then
@@ -109,10 +112,10 @@ get_user_settings() {
 # Настройка проекта
 setup_project() {
     info "Настройка файлов проекта..."
-    
+
     # Создание необходимых директорий
     mkdir -p nginx/logs nginx/ssl nginx/conf.d
-    
+
     # Проверка .env файла
     if [ ! -f .env ]; then
         if [ -f .env.examples ]; then
@@ -124,7 +127,6 @@ setup_project() {
             echo "  - LOGIN и PASSWORD (логин для входа в приложение)"
             echo "  - SEND_FROM и EMAIL_PASS (настройки почты)"
             echo "  - JWT_SECRET_KEY (секретный ключ)"
-            echo "  - TOTP_SECRET (секрет для 2FA)"
             echo ""
             read -p "Нажмите Enter когда отредактируете .env или Enter для продолжения с примерами..."
         else
@@ -134,23 +136,23 @@ setup_project() {
     else
         success "Файл .env найден"
     fi
-    
+
     # Проверка дополнительных файлов
     info "Проверка дополнительных файлов..."
     missing_files=()
-    
+
     if [ ! -f "src/utils/doctor_form/Бланк Врача.pptx" ]; then
         missing_files+=("src/utils/doctor_form/Бланк Врача.pptx")
     fi
-    
+
     if [ ! -f "src/utils/gen_cert/Сертификат_шаблон.pptx" ]; then
         missing_files+=("src/utils/gen_cert/Сертификат_шаблон.pptx")
     fi
-    
+
     if [ ! -f "src/utils/send_email/email_templates.py" ]; then
         missing_files+=("src/utils/send_email/email_templates.py")
     fi
-    
+
     if [ ${#missing_files[@]} -gt 0 ]; then
         warning "Отсутствуют файлы шаблонов:"
         for file in "${missing_files[@]}"; do
@@ -170,7 +172,7 @@ setup_project() {
 # Настройка nginx конфигурации
 setup_nginx() {
     info "Настройка nginx..."
-    
+
     if [ "$USE_HTTPS" = true ]; then
         # HTTPS конфигурация
         cat > nginx/conf.d/rit-utils.conf << EOF
@@ -183,13 +185,13 @@ upstream fastapi_backend {
 server {
     listen 80;
     server_name $DOMAIN;
-    
+
     # Let's Encrypt ACME challenge
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
         try_files \$uri \$uri/ =404;
     }
-    
+
     # Перенаправление всего остального на HTTPS
     location / {
         return 301 https://\$server_name\$request_uri;
@@ -201,25 +203,25 @@ server {
     listen 443 ssl;
     http2 on;
     server_name $DOMAIN;
-    
+
     # SSL сертификаты
     ssl_certificate /etc/nginx/ssl/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/nginx/ssl/live/$DOMAIN/privkey.pem;
-    
+
     # SSL настройки
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    
+
     # Безопасность
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Frame-Options DENY always;
     add_header X-Content-Type-Options nosniff always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    
+
     # Лимиты
     client_max_body_size 20M;
     client_body_timeout 60s;
@@ -234,12 +236,12 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Server \$host;
-        
+
         # Таймауты
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
-        
+
         # Для WebSocket поддержки
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -255,7 +257,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Server \$host;
-        
+
         # Кэширование статики
         expires 30d;
         add_header Cache-Control "public, immutable";
@@ -267,7 +269,7 @@ server {
         log_not_found off;
         return 204;
     }
-    
+
     location = /robots.txt {
         access_log off;
         log_not_found off;
@@ -295,7 +297,7 @@ upstream fastapi_backend {
 server {
     listen 80;
     server_name $SERVER_IP;
-    
+
     # Лимиты
     client_max_body_size 20M;
     client_body_timeout 60s;
@@ -310,12 +312,12 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Server \$host;
-        
+
         # Таймауты
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
-        
+
         # Для WebSocket поддержки
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -331,7 +333,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Server \$host;
-        
+
         # Кэширование статики
         expires 30d;
         add_header Cache-Control "public, immutable";
@@ -343,7 +345,7 @@ server {
         log_not_found off;
         return 204;
     }
-    
+
     location = /robots.txt {
         access_log off;
         log_not_found off;
@@ -360,7 +362,7 @@ server {
 }
 EOF
     fi
-    
+
     success "Nginx конфигурация создана"
 }
 
@@ -369,16 +371,16 @@ setup_ssl() {
     if [ "$USE_HTTPS" != true ]; then
         return 0
     fi
-    
+
     info "Настройка SSL сертификата..."
-    
+
     # Проверка DNS
     info "Проверка DNS для $DOMAIN..."
     if ! nslookup $DOMAIN > /dev/null 2>&1; then
         error "DNS для $DOMAIN не настроен или еще не распространился"
         warning "Настройте A-запись: $DOMAIN → $SERVER_IP"
         warning "Подождите 1-24 часа после настройки DNS"
-        
+
         read -p "Продолжить без HTTPS? [y/N]: " continue_without_ssl
         if [[ $continue_without_ssl =~ ^[Yy]$ ]]; then
             warning "Переключение на HTTP конфигурацию..."
@@ -389,28 +391,28 @@ setup_ssl() {
             exit 1
         fi
     fi
-    
+
     # Остановка nginx для освобождения порта 80
     info "Временная остановка nginx..."
-    docker-compose stop nginx 2>/dev/null || true
-    
+    sudo docker-compose stop nginx 2>/dev/null || true
+
     # Остановка системного nginx если есть
     sudo systemctl stop nginx 2>/dev/null || true
     sudo pkill -f nginx 2>/dev/null || true
-    
+
     # Проверка что порт 80 свободен
     if ss -tlnp | grep -q ":80 "; then
         error "Порт 80 занят. Остановите процессы использующие порт 80"
         ss -tlnp | grep ":80"
         exit 1
     fi
-    
+
     # Создание webroot директории
     mkdir -p ./nginx/ssl
-    
+
     # Получение сертификата
     info "Получение SSL сертификата от Let's Encrypt..."
-    docker run --rm \
+    sudo docker run --rm \
         -p 80:80 \
         -v $(pwd)/nginx/ssl:/etc/letsencrypt \
         certbot/certbot \
@@ -421,73 +423,74 @@ setup_ssl() {
         --no-eff-email \
         --force-renewal \
         -d $DOMAIN
-    
+
     # Проверка что сертификат создался
-    if [ ! -f "./nginx/ssl/live/$DOMAIN/fullchain.pem" ]; then
+    if ! sudo test -f "./nginx/ssl/live/$DOMAIN/fullchain.pem"; then
         error "Сертификат не был создан"
         warning "Переключение на HTTP конфигурацию..."
         USE_HTTPS=false
         setup_nginx
         return 0
     fi
-    
+
     success "SSL сертификат успешно получен"
-    
+
     # Создание скрипта автообновления
     info "Настройка автообновления SSL сертификата..."
+    sudo rm -f renew-cert.sh
     cat > renew-cert.sh << 'EOF'
 #!/bin/bash
 echo "🔄 Обновление SSL сертификата..."
 
 # Остановка nginx
-docker-compose stop nginx
+sudo docker-compose stop nginx
 
 # Обновление сертификата
-docker run --rm \
+sudo docker run --rm \
     -p 80:80 \
     -v $(pwd)/nginx/ssl:/etc/letsencrypt \
     certbot/certbot renew
 
 # Запуск nginx
-docker-compose start nginx
+sudo docker-compose start nginx
 
 echo "✅ Сертификат обновлен"
 EOF
-    
+
     chmod +x renew-cert.sh
-    
+
     # Добавление в crontab
     (crontab -l 2>/dev/null; echo "0 12 * * * $(pwd)/renew-cert.sh >> $(pwd)/certbot.log 2>&1") | crontab -
-    
+
     success "Автообновление SSL настроено (ежедневно в 12:00)"
 }
 
 # Развертывание приложения
 deploy_app() {
     info "Развертывание приложения..."
-    
+
     # Остановка существующих контейнеров
-    docker-compose down 2>/dev/null || true
-    
+    sudo docker-compose down 2>/dev/null || true
+
     # Сборка образов
     info "Сборка Docker образов..."
-    docker-compose build --no-cache
-    
+    sudo docker-compose build --no-cache
+
     # Запуск сервисов
     info "Запуск сервисов..."
-    docker-compose up -d
-    
+    sudo docker-compose up -d
+
     # Ожидание запуска
     sleep 10
-    
+
     # Проверка статуса
     info "Проверка статуса сервисов..."
-    docker-compose ps
-    
+    sudo docker-compose ps
+
     # Проверка логов
     info "Проверка логов приложения:"
-    docker-compose logs --tail=10 app
-    
+    sudo docker-compose logs --tail=10 app
+
     success "Приложение развернуто"
 }
 
@@ -496,7 +499,7 @@ show_final_info() {
     echo ""
     success "🎉 Развертывание завершено!"
     echo ""
-    
+
     if [ "$USE_HTTPS" = true ]; then
         info "Приложение доступно по адресу:"
         echo "   🌐 HTTPS: https://$DOMAIN"
@@ -509,16 +512,16 @@ show_final_info() {
         info "Приложение доступно по адресу:"
         echo "   🌐 HTTP: http://$SERVER_IP"
     fi
-    
+
     echo ""
     info "Управление приложением:"
-    echo "   📊 Статус:          docker-compose ps"
-    echo "   📋 Логи:            docker-compose logs -f"
-    echo "   🔄 Перезапуск:      docker-compose restart"
-    echo "   ⏹️  Остановка:       docker-compose down"
-    echo "   🔧 Обновление:      git pull && docker-compose restart"
+    echo "   📊 Статус:          sudo docker-compose ps"
+    echo "   📋 Логи:            sudo docker-compose logs -f"
+    echo "   🔄 Перезапуск:      sudo docker-compose restart"
+    echo "   ⏹️  Остановка:       sudo docker-compose down"
+    echo "   🔧 Обновление:      git pull && sudo docker-compose restart"
     echo ""
-    
+
     if [ ${#missing_files[@]} -gt 0 ]; then
         warning "Не забудьте добавить файлы шаблонов для полной функциональности:"
         for file in "${missing_files[@]}"; do
@@ -526,14 +529,6 @@ show_final_info() {
         done
         echo ""
     fi
-    
-    info "Первый вход в систему:"
-    echo "   1. Откройте приложение в браузере"
-    echo "   2. Используйте логин/пароль из .env файла"
-    echo "   3. Настройте 2FA отсканировав QR-код"
-    echo ""
-    
-    warning "Убедитесь что порты 80 и 443 открыты в брандмауэре!"
 }
 
 # Основная функция
