@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # 🔄 Скрипт обновления RIT-Utils на сервере
+# Использование: ./update.sh [branch]
+# Или установите переменную: BRANCH=test ./update.sh
 
 set -e
 
@@ -16,8 +18,12 @@ info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 error() { echo -e "${RED}❌ $1${NC}"; }
 
+# Определяем ветку для обновления
+BRANCH=${1:-${BRANCH:-main}}
+
 echo "🔄 Обновление RIT-Utils"
 echo "======================"
+info "Целевая ветка: $BRANCH"
 
 # Проверяем что мы в правильной директории
 if [ ! -f "docker-compose.yml" ] || [ ! -f "src/main.py" ]; then
@@ -40,10 +46,33 @@ info "Текущий коммит: $current_commit"
 info "Получение обновлений из Git..."
 git fetch origin
 
+# Проверяем существование ветки
+if ! git rev-parse --verify origin/$BRANCH >/dev/null 2>&1; then
+    error "Ветка '$BRANCH' не существует в удаленном репозитории"
+    info "Доступные ветки:"
+    git branch -r | grep -v HEAD | sed 's|origin/||' | sed 's|^|  |'
+    exit 1
+fi
+
+# Проверяем текущую ветку
+current_branch=$(git branch --show-current)
+if [ "$current_branch" != "$BRANCH" ]; then
+    warning "Текущая ветка: $current_branch, целевая ветка: $BRANCH"
+    read -p "Переключиться на ветку $BRANCH? [Y/n]: " switch_branch
+    if [[ ! $switch_branch =~ ^[Nn]$ ]]; then
+        info "Переключение на ветку $BRANCH..."
+        git checkout $BRANCH
+        success "Переключились на ветку $BRANCH"
+    else
+        info "Продолжаем обновление с текущей ветки $current_branch"
+        BRANCH=$current_branch
+    fi
+fi
+
 # Проверяем есть ли обновления
-if git diff HEAD origin/main --quiet; then
+if git diff HEAD origin/$BRANCH --quiet; then
     success "Код уже актуален, обновления не требуются"
-    
+
     # Спрашиваем нужно ли перезапустить принудительно
     read -p "Перезапустить приложение принудительно? [y/N]: " force_restart
     if [[ ! $force_restart =~ ^[Yy]$ ]]; then
@@ -52,16 +81,16 @@ if git diff HEAD origin/main --quiet; then
     fi
 else
     info "Найдены обновления, применяем..."
-    
+
     # Показываем что изменилось
     echo ""
     info "Изменения:"
-    git log --oneline HEAD..origin/main
+    git log --oneline HEAD..origin/$BRANCH
     echo ""
-    
+
     # Применяем обновления
-    git pull origin main
-    
+    git pull origin $BRANCH
+
     new_commit=$(git rev-parse --short HEAD)
     success "Обновлено до коммита: $new_commit"
 fi
@@ -155,3 +184,8 @@ echo "  📊 Статус:     docker-compose ps"
 echo "  📋 Логи:       docker-compose logs -f"
 echo "  🔄 Рестарт:    docker-compose restart"
 echo "  ⏹️  Остановка:  docker-compose down"
+echo ""
+info "Обновление из других веток:"
+echo "  🌿 Тест:       ./update.sh test"
+echo "  🌿 Разработка: ./update.sh main"
+echo "  🌿 Переменная: BRANCH=test ./update.sh"
