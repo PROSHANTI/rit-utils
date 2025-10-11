@@ -25,7 +25,7 @@ poetry run pytest tests/test_auth_login.py
 
 ### Конкретный тест
 ```bash
-poetry run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success_with_2fa_configured
+poetry run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success
 ```
 
 ### С покрытием кода
@@ -47,7 +47,7 @@ poetry run pytest -m "not slow"
 
 ### Покрытие
 Тесты покрывают:
-- ✅ Аутентификацию и авторизацию  
+- ✅ Аутентификацию и авторизацию
 - ✅ Двухфакторную аутентификацию
 - ✅ Отправку email
 - ✅ Генерацию сертификатов
@@ -66,14 +66,13 @@ poetry run pytest -m "not slow"
 Тесты используют следующие тестовые переменные:
 - `JWT_SECRET_KEY` - Секретный ключ для JWT
 - `LOGIN/PASSWORD` - Тестовые учетные данные
-- `TOTP_SECRET` - Секрет для 2FA
 - `SEND_FROM/EMAIL_PASS` - Email настройки
 - `ADDR_TO/BCC_TO` - Email получатели
 
 ## Рекомендации
 
 1. Запускайте тесты перед каждым коммитом
-2. Добавляйте тесты для новой функциональности  
+2. Добавляйте тесты для новой функциональности
 3. Поддерживайте высокое покрытие кода
 4. Используйте понятные имена тестов
 5. Группируйте связанные тесты в классы

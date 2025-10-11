@@ -91,7 +91,7 @@ def mock_pptx():
         mock_text_frame = MagicMock()
         mock_paragraph = MagicMock()
         mock_run = MagicMock()
-        
+
         # Настройка цепочки моков
         mock_presentation.slides = [mock_slide]
         mock_slide.shapes = [mock_shape]
@@ -100,7 +100,7 @@ def mock_pptx():
         mock_text_frame.paragraphs = [mock_paragraph]
         mock_paragraph.runs = [mock_run]
         mock_run.text = "placeholder_text"
-        
+
         mock_prs.return_value = mock_presentation
         yield mock_presentation
 
@@ -123,13 +123,6 @@ def reset_revoked_tokens():
     REVOKED_TOKENS.clear()
 
 
-@pytest.fixture(autouse=True) 
-def reset_user_secrets():
-    """Очистка пользовательских секретов перед каждым тестом"""
-    from src.auth.two_factor import USER_SECRETS
-    USER_SECRETS.clear()
-    yield
-    USER_SECRETS.clear()
 
 
 # Настройка pytest-asyncio

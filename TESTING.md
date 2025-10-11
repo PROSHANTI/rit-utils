@@ -12,7 +12,6 @@ tests/
 ├── conftest.py                     # Конфигурация pytest и фикстуры
 ├── test_auth_cookie_utils.py       # Тесты утилит для cookies
 ├── test_auth_login.py              # Тесты аутентификации
-├── test_auth_two_factor.py         # Тесты 2FA
 ├── test_config.py                  # Тесты конфигурации
 ├── test_integration_endpoints.py   # Интеграционные тесты API
 ├── test_main.py                    # Тесты основного модуля
@@ -26,7 +25,6 @@ tests/
 
 ### Модули аутентификации
 - ✅ **Логин/логаут** (`src/auth/login.py`) - 17 тестов
-- ✅ **Двухфакторная аутентификация** (`src/auth/two_factor.py`) - 18 тестов  
 - ✅ **Cookie утилиты** (`src/auth/cookie_utils.py`) - 4 теста
 
 ### Утилиты
@@ -112,7 +110,7 @@ testpaths = tests
 addopts = -v --tb=short --strict-markers --disable-warnings --color=yes
 markers =
     slow: marks tests as slow
-    integration: marks tests as integration tests  
+    integration: marks tests as integration tests
     unit: marks tests as unit tests
 ```
 
@@ -133,7 +131,7 @@ markers =
 - Полная изоляция от внешних зависимостей
 - Быстрое выполнение
 
-### Интеграционные тесты  
+### Интеграционные тесты
 - Тестируют взаимодействие компонентов
 - Проверка HTTP endpoints
 - Тестирование полного flow аутентификации
