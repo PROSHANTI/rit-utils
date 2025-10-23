@@ -31,7 +31,7 @@
 ### Установка
 1. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/your-repo/rit-utils.git
+   git clone https://github.com/PROSHANTI/rit-utils.git
    cd rit-utils
    ```
 
@@ -46,7 +46,7 @@
 4. Настройте переменные окружения:
    ```bash
    cp .env.examples .env
-   nano .env  # Отредактируйте переменные окружения
+   nano .env
    ```
 
    **Обязательно настройте:**
@@ -94,7 +94,6 @@ sudo ./deploy.sh
 
 ### Ручное обновление
 ```bash
-# Обновление с проверкой изменений
 ./update.sh
 ```
 
@@ -102,13 +101,8 @@ sudo ./deploy.sh
 
 ### Локальная разработка
 ```bash
-# Сборка и запуск
 docker-compose up -d
-
-# Просмотр логов
 docker-compose logs -f
-
-# Остановка
 docker-compose down
 ```
 
@@ -116,17 +110,13 @@ docker-compose down
 
 ### Переменные окружения (.env)
 ```bash
-# Email настройки
 SEND_FROM=your_email@yandex.ru
 EMAIL_PASS=your_password
 ADDR_TO=recipient@example.com
 BCC_TO=bcc@example.com
 
-# Учетные данные для входа
 LOGIN=admin
 PASSWORD=your-admin-password
-
-# JWT настройки
 JWT_SECRET_KEY=your-super-secret-jwt-key-here
 ```
 
@@ -139,35 +129,12 @@ JWT_SECRET_KEY=your-super-secret-jwt-key-here
 ### 🚀 Быстрый запуск тестов
 
 ```bash
-# Все тесты
 ./run_tests.sh
-
-# Тесты по категориям
 ./run_tests.sh auth        # Тесты аутентификации
 ./run_tests.sh utils       # Тесты утилит
 ./run_tests.sh integration # Интеграционные тесты
-
-# Анализ покрытия кода
-./run_tests.sh coverage
-
-# Быстрый запуск (остановка на первой ошибке)
+./run_tests.sh coverage    # Анализ покрытия кода
 ./run_tests.sh fast
-```
-
-### 📋 Прямое использование pytest
-
-```bash
-# Все тесты
-poetry run pytest
-
-# Конкретный файл
-poetry run pytest tests/test_auth_login.py
-
-# Конкретный тест
-poetry run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success
-
-# С покрытием кода
-poetry run pytest --cov=src --cov-report=html
 ```
 
 ### 📊 Покрытие тестами
@@ -212,101 +179,6 @@ tests/
 - [TESTING.md](TESTING.md) - Полная документация по тестированию
 - `htmlcov/index.html` - HTML отчет о покрытии кода (после `./run_tests.sh coverage`)
 
-### 🎯 Рекомендации
-
-1. **Запускайте тесты** перед каждым коммитом
-2. **Добавляйте тесты** для новой функциональности
-3. **Поддерживайте высокое покрытие** кода (>80%)
-4. **Используйте `./run_tests.sh fast`** для быстрой проверки
-
-## 🧪 Тестирование
-
-Проект включает комплексную систему тестирования с **106 тестами** и **83% покрытием кода**.
-
-### 🚀 Быстрый запуск тестов
-
-```bash
-# Все тесты
-./run_tests.sh
-
-# Тесты по категориям
-./run_tests.sh auth        # Тесты аутентификации
-./run_tests.sh utils       # Тесты утилит  
-./run_tests.sh integration # Интеграционные тесты
-
-# Анализ покрытия кода
-./run_tests.sh coverage
-
-# Быстрый запуск (остановка на первой ошибке)
-./run_tests.sh fast
-```
-
-### 📋 Прямое использование pytest
-
-```bash
-# Все тесты
-poetry run pytest
-
-# Конкретный файл
-poetry run pytest tests/test_auth_login.py
-
-# Конкретный тест
-poetry run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success
-
-# С покрытием кода
-poetry run pytest --cov=src --cov-report=html
-```
-
-### 📊 Покрытие тестами
-
-| Модуль | Покрытие | Описание |
-|--------|----------|----------|
-| `email_handler.py` | **100%** | Отправка email |
-| `cookie_utils.py` | **100%** | Безопасные cookies |
-| `two_factor.py` | **98%** | Двухфакторная аутентификация |
-| `login.py` | **89%** | Система входа/выхода |
-| `gen_cert_handler.py` | **89%** | Генерация сертификатов |
-| `doctor_form_handler.py` | **75%** | Формы врачей |
-| **Общее покрытие** | **83%** | **Отличный результат** |
-
-### 🗂️ Структура тестов
-
-```
-tests/
-├── conftest.py                     # Фикстуры и конфигурация pytest
-├── test_auth_login.py              # 17 тестов аутентификации  
-├── test_auth_two_factor.py         # 18 тестов 2FA
-├── test_auth_cookie_utils.py       # 4 теста cookie утилит
-├── test_utils_email.py             # 8 тестов отправки email
-├── test_utils_gen_cert.py          # 13 тестов генерации сертификатов
-├── test_utils_doctor_form.py       # 11 тестов форм врачей
-├── test_integration_endpoints.py   # 25 интеграционных тестов API
-├── test_main.py                    # 10 тестов основного модуля
-├── test_config.py                  # 2 теста конфигурации
-└── README.md                       # Документация по тестам
-```
-
-### ✨ Особенности тестирования
-
-- ✅ **Без запуска сервера** - все тесты работают изолированно
-- ✅ **Полное мокирование** внешних зависимостей (SMTP, LibreOffice, файлы)
-- ✅ **Тестовые переменные** окружения для безопасности
-- ✅ **Автоматическая очистка** состояния между тестами
-- ✅ **pytest-cov** для анализа покрытия кода
-- ✅ **HTML отчеты** о покрытии в `htmlcov/`
-
-### 📖 Дополнительная документация
-
-- [tests/README.md](tests/README.md) - Подробное описание тестов
-- [TESTING.md](TESTING.md) - Полная документация по тестированию
-- `htmlcov/index.html` - HTML отчет о покрытии кода (после `./run_tests.sh coverage`)
-
-### 🎯 Рекомендации
-
-1. **Запускайте тесты** перед каждым коммитом
-2. **Добавляйте тесты** для новой функциональности
-3. **Поддерживайте высокое покрытие** кода (>80%)
-4. **Используйте `./run_tests.sh fast`** для быстрой проверки
 
 ## 📚 Документация
 
