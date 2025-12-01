@@ -1,12 +1,10 @@
 #!/bin/bash
 
-# 🚀 Универсальный скрипт развертывания RIT-Utils
-# Поддерживает HTTP и HTTPS развертывание
+# 🚀 Скрипт первичного развертывания RIT-Utils
+# Использование: ./deploy.sh
+# Предполагается, что HTTPS уже настроен через certbot
 
 set -e
-
-echo "🚀 Универсальное развертывание RIT-Utils"
-echo "========================================"
 
 # Цвета для вывода
 RED='\033[0;31m'
@@ -21,13 +19,78 @@ error() { echo -e "${RED}❌ $1${NC}"; }
 warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 
+# Переменные
+PROJECT_DIR="/home/shanti/rit-utils"
+
+# Определение окружения и домена
+detect_environment() {
+    # Проверяем переменную окружения
+    if [ ! -z "$ENV" ]; then
+        if [ "$ENV" = "test" ] || [ "$ENV" = "prod" ]; then
+            echo "$ENV"
+            return 0
+        fi
+    fi
+
+    # Определяем по домену из nginx конфига
+    if [ -f "nginx/conf.d/rit-utils.conf" ]; then
+        DOMAIN_FROM_CONFIG=$(grep "server_name" nginx/conf.d/rit-utils.conf | head -1 | awk '{print $2}' | sed 's/;//' | awk '{print $1}')
+
+        if echo "$DOMAIN_FROM_CONFIG" | grep -q "test"; then
+            echo "test"
+            return 0
+        elif echo "$DOMAIN_FROM_CONFIG" | grep -q "ritclinic-utils.ru"; then
+            echo "prod"
+            return 0
+        fi
+    fi
+
+    # Fallback: определяем по текущему домену сервера
+    HOSTNAME=$(hostname -f 2>/dev/null || echo "")
+    if echo "$HOSTNAME" | grep -q "test"; then
+        echo "test"
+        return 0
+    fi
+
+    # По умолчанию - prod
+    echo "prod"
+}
+
+ENVIRONMENT=$(detect_environment)
+
+if [ "$ENVIRONMENT" = "test" ]; then
+    DOMAIN="ritclinic-utils-test.ru"
+    BRANCH="test"
+    ENV_LABEL="🧪 ТЕСТОВОЕ"
+else
+    DOMAIN="ritclinic-utils.ru"
+    BRANCH="main"
+    ENV_LABEL="🚀 ПРОДОВОЕ"
+fi
+
+CERTBOT_CERTS="/etc/letsencrypt/live/$DOMAIN"
+PROJECT_CERTS="$PROJECT_DIR/nginx/ssl/live/$DOMAIN"
+
+echo "🚀 Первичное развертывание RIT-Utils"
+echo "===================================="
+info "Окружение: $ENV_LABEL"
+info "Домен: $DOMAIN"
+info "Ветка Git: $BRANCH"
+echo ""
+
+# Проверка что скрипт запущен из правильной директории
+if [ ! -f "docker-compose.yml" ] || [ ! -f "src/main.py" ]; then
+    error "Запустите скрипт из корневой директории проекта rit-utils"
+    exit 1
+fi
+
 # Функция проверки команды
 check_command() {
     if command -v $1 &> /dev/null; then
         success "$1 найден"
         return 0
     else
-        error "$1 не найден"
+        error "$1 не найден. Установите его перед продолжением."
         return 1
     fi
 }
@@ -35,460 +98,275 @@ check_command() {
 # Проверка системных требований
 check_requirements() {
     info "Проверка системных требований..."
-    
-    # Проверка Docker
+
     if ! check_command docker; then
-        warning "Установка Docker..."
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sudo sh get-docker.sh
-        sudo usermod -aG docker $USER
-        rm get-docker.sh
-        success "Docker установлен"
-    fi
-
-    # Проверка Docker Compose
-    if ! check_command docker-compose; then
-        warning "Установка Docker Compose..."
-        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-        success "Docker Compose установлен"
-    fi
-
-    # Проверка git
-    if ! check_command git; then
-        warning "Установка Git..."
-        sudo apt update
-        sudo apt install -y git
-        success "Git установлен"
-    fi
-
-    # Проверка curl и openssl для HTTPS
-    sudo apt update
-    sudo apt install -y curl openssl
-}
-
-# Получение настроек от пользователя
-get_user_settings() {
-    echo ""
-    info "Настройка проекта"
-    echo "=================="
-    
-    # Домен или IP
-    echo ""
-    echo -e "${BLUE}Введите ваш домен или оставьте пустым для использования только IP:${NC}"
-    echo "Примеры:"
-    echo "  - myapp.ru (для HTTPS)"
-    echo "  - оставить пустым (только HTTP по IP)"
-    read -p "Домен: " DOMAIN
-    
-    if [ -z "$DOMAIN" ]; then
-        USE_HTTPS=false
-        info "Будет настроен HTTP по IP адресу"
-    else
-        USE_HTTPS=true
-        info "Будет настроен HTTPS для домена: $DOMAIN"
-        
-        # Email для Let's Encrypt
-        echo -e "${BLUE}Введите email для Let's Encrypt:${NC}"
-        read -p "Email: " SSL_EMAIL
-        if [ -z "$SSL_EMAIL" ]; then
-            SSL_EMAIL="admin@$DOMAIN"
-        fi
-    fi
-    
-    # Получение IP адреса сервера
-    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "YOUR_SERVER_IP")
-    if [ "$SERVER_IP" = "YOUR_SERVER_IP" ]; then
-        warning "Не удалось определить IP сервера автоматически"
-        read -p "Введите IP сервера: " SERVER_IP
-    else
-        info "Обнаружен IP сервера: $SERVER_IP"
-    fi
-}
-
-# Настройка проекта
-setup_project() {
-    info "Настройка файлов проекта..."
-    
-    # Создание необходимых директорий
-    mkdir -p nginx/logs nginx/ssl nginx/conf.d
-    
-    # Проверка .env файла
-    if [ ! -f .env ]; then
-        if [ -f .env.examples ]; then
-            warning "Копирование .env.examples в .env..."
-            cp .env.examples .env
-            echo ""
-            warning "ВАЖНО: Отредактируйте файл .env с вашими данными!"
-            echo -e "${YELLOW}Основные настройки для изменения:${NC}"
-            echo "  - LOGIN и PASSWORD (логин для входа в приложение)"
-            echo "  - SEND_FROM и EMAIL_PASS (настройки почты)"
-            echo "  - JWT_SECRET_KEY (секретный ключ)"
-            echo "  - TOTP_SECRET (секрет для 2FA)"
-            echo ""
-            read -p "Нажмите Enter когда отредактируете .env или Enter для продолжения с примерами..."
-        else
-            error "Файл .env.examples не найден!"
-            exit 1
-        fi
-    else
-        success "Файл .env найден"
-    fi
-    
-    # Проверка дополнительных файлов
-    info "Проверка дополнительных файлов..."
-    missing_files=()
-    
-    if [ ! -f "src/utils/doctor_form/Бланк Врача.pptx" ]; then
-        missing_files+=("src/utils/doctor_form/Бланк Врача.pptx")
-    fi
-    
-    if [ ! -f "src/utils/gen_cert/Сертификат_шаблон.pptx" ]; then
-        missing_files+=("src/utils/gen_cert/Сертификат_шаблон.pptx")
-    fi
-    
-    if [ ! -f "src/utils/send_email/email_templates.py" ]; then
-        missing_files+=("src/utils/send_email/email_templates.py")
-    fi
-    
-    if [ ${#missing_files[@]} -gt 0 ]; then
-        warning "Отсутствуют файлы шаблонов:"
-        for file in "${missing_files[@]}"; do
-            echo "   - $file"
-        done
-        echo ""
-        warning "Добавьте эти файлы для полной функциональности"
-        read -p "Продолжить без них? [y/N]: " continue_without_files
-        if [[ ! $continue_without_files =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
-    else
-        success "Все дополнительные файлы найдены"
-    fi
-}
-
-# Настройка nginx конфигурации
-setup_nginx() {
-    info "Настройка nginx..."
-    
-    if [ "$USE_HTTPS" = true ]; then
-        # HTTPS конфигурация
-        cat > nginx/conf.d/rit-utils.conf << EOF
-# Upstream для FastAPI приложения
-upstream fastapi_backend {
-    server app:8000;
-}
-
-# Перенаправление HTTP на HTTPS
-server {
-    listen 80;
-    server_name $DOMAIN;
-    
-    # Let's Encrypt ACME challenge
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        try_files \$uri \$uri/ =404;
-    }
-    
-    # Перенаправление всего остального на HTTPS
-    location / {
-        return 301 https://\$server_name\$request_uri;
-    }
-}
-
-# HTTPS сервер
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name $DOMAIN;
-    
-    # SSL сертификаты
-    ssl_certificate /etc/nginx/ssl/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/nginx/ssl/live/$DOMAIN/privkey.pem;
-    
-    # SSL настройки
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-    
-    # Безопасность
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    
-    # Лимиты
-    client_max_body_size 20M;
-    client_body_timeout 60s;
-    client_header_timeout 60s;
-
-    # Основные локации
-    location / {
-        proxy_pass http://fastapi_backend;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Server \$host;
-        
-        # Таймауты
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Для WebSocket поддержки
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    # Статические файлы
-    location /static/ {
-        proxy_pass http://fastapi_backend;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Server \$host;
-        
-        # Кэширование статики
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Системные файлы
-    location = /favicon.ico {
-        access_log off;
-        log_not_found off;
-        return 204;
-    }
-    
-    location = /robots.txt {
-        access_log off;
-        log_not_found off;
-        return 200 "User-agent: *\nDisallow: /\n";
-        add_header Content-Type text/plain;
-    }
-
-    # Блокировка доступа к служебным файлам
-    location ~ /\. {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-}
-EOF
-    else
-        # HTTP конфигурация
-        cat > nginx/conf.d/rit-utils.conf << EOF
-# Upstream для FastAPI приложения
-upstream fastapi_backend {
-    server app:8000;
-}
-
-# HTTP сервер
-server {
-    listen 80;
-    server_name $SERVER_IP;
-    
-    # Лимиты
-    client_max_body_size 20M;
-    client_body_timeout 60s;
-    client_header_timeout 60s;
-
-    # Основные локации
-    location / {
-        proxy_pass http://fastapi_backend;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Server \$host;
-        
-        # Таймауты
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Для WebSocket поддержки
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    # Статические файлы
-    location /static/ {
-        proxy_pass http://fastapi_backend;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Server \$host;
-        
-        # Кэширование статики
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Системные файлы
-    location = /favicon.ico {
-        access_log off;
-        log_not_found off;
-        return 204;
-    }
-    
-    location = /robots.txt {
-        access_log off;
-        log_not_found off;
-        return 200 "User-agent: *\nDisallow: /\n";
-        add_header Content-Type text/plain;
-    }
-
-    # Блокировка доступа к служебным файлам
-    location ~ /\. {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-}
-EOF
-    fi
-    
-    success "Nginx конфигурация создана"
-}
-
-# Получение SSL сертификата
-setup_ssl() {
-    if [ "$USE_HTTPS" != true ]; then
-        return 0
-    fi
-    
-    info "Настройка SSL сертификата..."
-    
-    # Проверка DNS
-    info "Проверка DNS для $DOMAIN..."
-    if ! nslookup $DOMAIN > /dev/null 2>&1; then
-        error "DNS для $DOMAIN не настроен или еще не распространился"
-        warning "Настройте A-запись: $DOMAIN → $SERVER_IP"
-        warning "Подождите 1-24 часа после настройки DNS"
-        
-        read -p "Продолжить без HTTPS? [y/N]: " continue_without_ssl
-        if [[ $continue_without_ssl =~ ^[Yy]$ ]]; then
-            warning "Переключение на HTTP конфигурацию..."
-            USE_HTTPS=false
-            setup_nginx
-            return 0
-        else
-            exit 1
-        fi
-    fi
-    
-    # Остановка nginx для освобождения порта 80
-    info "Временная остановка nginx..."
-    docker-compose stop nginx 2>/dev/null || true
-    
-    # Остановка системного nginx если есть
-    sudo systemctl stop nginx 2>/dev/null || true
-    sudo pkill -f nginx 2>/dev/null || true
-    
-    # Проверка что порт 80 свободен
-    if ss -tlnp | grep -q ":80 "; then
-        error "Порт 80 занят. Остановите процессы использующие порт 80"
-        ss -tlnp | grep ":80"
         exit 1
     fi
-    
-    # Создание webroot директории
-    mkdir -p ./nginx/ssl
-    
-    # Получение сертификата
-    info "Получение SSL сертификата от Let's Encrypt..."
-    docker run --rm \
-        -p 80:80 \
-        -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-        certbot/certbot \
-        certonly \
-        --standalone \
-        --email $SSL_EMAIL \
-        --agree-tos \
-        --no-eff-email \
-        --force-renewal \
-        -d $DOMAIN
-    
-    # Проверка что сертификат создался
-    if [ ! -f "./nginx/ssl/live/$DOMAIN/fullchain.pem" ]; then
-        error "Сертификат не был создан"
-        warning "Переключение на HTTP конфигурацию..."
-        USE_HTTPS=false
-        setup_nginx
-        return 0
+
+    if ! check_command docker-compose; then
+        exit 1
     fi
-    
-    success "SSL сертификат успешно получен"
-    
-    # Создание скрипта автообновления
-    info "Настройка автообновления SSL сертификата..."
-    cat > renew-cert.sh << 'EOF'
-#!/bin/bash
-echo "🔄 Обновление SSL сертификата..."
 
-# Остановка nginx
-docker-compose stop nginx
+    if ! check_command git; then
+        exit 1
+    fi
 
-# Обновление сертификата
-docker run --rm \
-    -p 80:80 \
-    -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-    certbot/certbot renew
+    success "Все системные требования выполнены"
+}
 
-# Запуск nginx
-docker-compose start nginx
+# Проверка и настройка SSL сертификатов
+setup_ssl_certs() {
+    info "Проверка SSL сертификатов..."
 
-echo "✅ Сертификат обновлен"
-EOF
-    
-    chmod +x renew-cert.sh
-    
-    # Добавление в crontab
-    (crontab -l 2>/dev/null; echo "0 12 * * * $(pwd)/renew-cert.sh >> $(pwd)/certbot.log 2>&1") | crontab -
-    
-    success "Автообновление SSL настроено (ежедневно в 12:00)"
+    # Проверяем наличие сертификатов в проекте (включая символические ссылки)
+    # Используем -L для проверки файла по символической ссылке
+    if [ -L "$PROJECT_CERTS/fullchain.pem" ] || [ -f "$PROJECT_CERTS/fullchain.pem" ]; then
+        if [ -L "$PROJECT_CERTS/privkey.pem" ] || [ -f "$PROJECT_CERTS/privkey.pem" ]; then
+            success "Сертификаты найдены в проекте: $PROJECT_CERTS"
+
+            # Проверяем права доступа (Docker контейнер должен иметь доступ)
+            # Проверяем, что файлы читаемы (даже если они принадлежат root)
+            if [ ! -r "$PROJECT_CERTS/fullchain.pem" ] || [ ! -r "$PROJECT_CERTS/privkey.pem" ]; then
+                warning "Проблемы с правами доступа к сертификатам"
+                info "Попытка исправить права доступа..."
+
+                # Проверяем, можем ли мы прочитать через sudo
+                if sudo test -r "$PROJECT_CERTS/fullchain.pem" && sudo test -r "$PROJECT_CERTS/privkey.pem"; then
+                    # Делаем файлы читаемыми для всех (безопасно, так как они в read-only volume)
+                    sudo chmod 644 "$PROJECT_CERTS/fullchain.pem" 2>/dev/null || true
+                    sudo chmod 644 "$PROJECT_CERTS/privkey.pem" 2>/dev/null || true
+                    # Также проверяем архивную директорию
+                    sudo chmod -R 755 "$PROJECT_DIR/nginx/ssl/archive" 2>/dev/null || true
+                    success "Права доступа исправлены"
+                else
+                    warning "Не удалось исправить права доступа, но Docker может иметь доступ через volume"
+                fi
+            fi
+
+            # Проверяем, что символические ссылки указывают на существующие файлы
+            if [ -L "$PROJECT_CERTS/fullchain.pem" ]; then
+                target=$(readlink -f "$PROJECT_CERTS/fullchain.pem" 2>/dev/null || readlink "$PROJECT_CERTS/fullchain.pem")
+                if [ ! -f "$target" ]; then
+                    error "Символическая ссылка fullchain.pem указывает на несуществующий файл: $target"
+                    exit 1
+                fi
+            fi
+
+            if [ -L "$PROJECT_CERTS/privkey.pem" ]; then
+                target=$(readlink -f "$PROJECT_CERTS/privkey.pem" 2>/dev/null || readlink "$PROJECT_CERTS/privkey.pem")
+                if [ ! -f "$target" ]; then
+                    error "Символическая ссылка privkey.pem указывает на несуществующий файл: $target"
+                    exit 1
+                fi
+            fi
+
+            return 0
+        fi
+    fi
+
+    # Если нет в проекте, проверяем certbot
+    if [ -d "$CERTBOT_CERTS" ]; then
+        if [ -f "$CERTBOT_CERTS/fullchain.pem" ] && [ -f "$CERTBOT_CERTS/privkey.pem" ]; then
+            warning "Сертификаты найдены в certbot, копируем в проект..."
+
+            # Создаем директории
+            mkdir -p "$PROJECT_DIR/nginx/ssl/live/$DOMAIN"
+            mkdir -p "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN"
+
+            # Копируем сертификаты (может потребоваться sudo)
+            if sudo test -r "$CERTBOT_CERTS/fullchain.pem" && sudo test -r "$CERTBOT_CERTS/privkey.pem"; then
+                # Копируем файлы в архив
+                sudo cp "$CERTBOT_CERTS/fullchain.pem" "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN/fullchain.pem"
+                sudo cp "$CERTBOT_CERTS/privkey.pem" "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN/privkey.pem"
+                sudo cp "$CERTBOT_CERTS/chain.pem" "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN/chain.pem" 2>/dev/null || true
+                sudo cp "$CERTBOT_CERTS/cert.pem" "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN/cert.pem" 2>/dev/null || true
+
+                # Создаем символические ссылки
+                cd "$PROJECT_DIR/nginx/ssl/live/$DOMAIN"
+                sudo ln -sf "../../archive/$DOMAIN/fullchain.pem" fullchain.pem
+                sudo ln -sf "../../archive/$DOMAIN/privkey.pem" privkey.pem
+                sudo ln -sf "../../archive/$DOMAIN/chain.pem" chain.pem 2>/dev/null || true
+                sudo ln -sf "../../archive/$DOMAIN/cert.pem" cert.pem 2>/dev/null || true
+
+                # Устанавливаем права доступа
+                sudo chmod -R 755 "$PROJECT_DIR/nginx/ssl/archive"
+                sudo chmod 644 "$PROJECT_DIR/nginx/ssl/archive/$DOMAIN"/*.pem
+                sudo chmod 755 "$PROJECT_DIR/nginx/ssl/live/$DOMAIN"
+
+                success "Сертификаты скопированы в проект"
+                return 0
+            else
+                error "Не удалось прочитать сертификаты из $CERTBOT_CERTS"
+                error "Проверьте права доступа или скопируйте сертификаты вручную"
+                exit 1
+            fi
+        fi
+    fi
+
+    error "SSL сертификаты не найдены!"
+    error "Ожидаемые пути:"
+    echo "  - В проекте: $PROJECT_CERTS/fullchain.pem"
+    echo "  - В certbot: $CERTBOT_CERTS/fullchain.pem"
+    echo ""
+    warning "Если сертификаты в другом месте, скопируйте их вручную:"
+    echo "  mkdir -p $PROJECT_DIR/nginx/ssl/live/$DOMAIN"
+    echo "  cp <путь_к_fullchain.pem> $PROJECT_CERTS/fullchain.pem"
+    echo "  cp <путь_к_privkey.pem> $PROJECT_CERTS/privkey.pem"
+    exit 1
+}
+
+# Проверка и переключение на нужную ветку Git
+check_git_branch() {
+    info "Проверка Git репозитория..."
+
+    if ! git status &>/dev/null; then
+        error "Это не Git репозиторий или Git недоступен"
+        exit 1
+    fi
+
+    # Получаем обновления
+    info "Получение обновлений из Git..."
+    git fetch origin
+
+    # Проверяем существование ветки
+    if ! git rev-parse --verify origin/$BRANCH >/dev/null 2>&1; then
+        error "Ветка '$BRANCH' не существует в удаленном репозитории"
+        info "Доступные ветки:"
+        git branch -r | grep -v HEAD | sed 's|origin/||' | sed 's|^|  |'
+        exit 1
+    fi
+
+    # Проверяем текущую ветку
+    current_branch=$(git branch --show-current)
+    if [ "$current_branch" != "$BRANCH" ]; then
+        warning "Текущая ветка: $current_branch, переключаемся на: $BRANCH"
+        git checkout $BRANCH
+        success "Переключились на ветку $BRANCH"
+    else
+        info "Уже на ветке $BRANCH"
+    fi
+
+    # Обновляем до последней версии
+    info "Обновление до последней версии ветки $BRANCH..."
+    git pull origin $BRANCH
+
+    success "Git репозиторий готов"
+}
+
+# Проверка необходимых файлов
+check_project_files() {
+    info "Проверка файлов проекта..."
+
+    if [ ! -f ".env" ]; then
+        error "Файл .env не найден!"
+        warning "Создайте файл .env с необходимыми переменными окружения"
+        exit 1
+    fi
+    success "Файл .env найден"
+
+    # Проверка директорий
+    mkdir -p nginx/logs nginx/ssl nginx/conf.d certbot-webroot
+    success "Директории созданы/проверены"
+
+    # Проверка конфигурации nginx
+    if [ ! -f "nginx/conf.d/rit-utils.conf" ]; then
+        error "Файл nginx/conf.d/rit-utils.conf не найден!"
+        exit 1
+    fi
+    success "Конфигурация nginx найдена"
+
+    # Проверка что директория ssl существует и доступна
+    if [ ! -d "nginx/ssl" ]; then
+        error "Директория nginx/ssl не найдена!"
+        exit 1
+    fi
+
+    # Убеждаемся, что директория ssl имеет правильные права для Docker
+    # Docker контейнер должен иметь возможность читать файлы
+    # Проверяем через sudo, так как файлы могут принадлежать root
+    if [ -d "nginx/ssl/archive" ]; then
+        # Делаем директорию archive читаемой (безопасно, так как volume read-only)
+        # Проверяем через sudo, если нужно
+        if sudo test -d nginx/ssl/archive 2>/dev/null; then
+            sudo chmod -R 755 nginx/ssl/archive 2>/dev/null || true
+            sudo find nginx/ssl/archive -type f -name "*.pem" -exec chmod 644 {} \; 2>/dev/null || true
+        else
+            chmod -R 755 nginx/ssl/archive 2>/dev/null || true
+            find nginx/ssl/archive -type f -name "*.pem" -exec chmod 644 {} \; 2>/dev/null || true
+        fi
+    fi
+
+    if [ -d "nginx/ssl/live" ]; then
+        if sudo test -d nginx/ssl/live 2>/dev/null; then
+            sudo chmod -R 755 nginx/ssl/live 2>/dev/null || true
+        else
+            chmod -R 755 nginx/ssl/live 2>/dev/null || true
+        fi
+    fi
+
+    info "Права доступа к SSL директории проверены"
+}
+
+# Остановка системного nginx если он запущен
+stop_system_nginx() {
+    info "Проверка системного nginx..."
+
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        warning "Системный nginx запущен, останавливаем..."
+        sudo systemctl stop nginx 2>/dev/null || true
+        success "Системный nginx остановлен"
+    else
+        info "Системный nginx не запущен"
+    fi
 }
 
 # Развертывание приложения
 deploy_app() {
     info "Развертывание приложения..."
-    
+
     # Остановка существующих контейнеров
+    info "Остановка существующих контейнеров..."
     docker-compose down 2>/dev/null || true
-    
+
     # Сборка образов
     info "Сборка Docker образов..."
     docker-compose build --no-cache
-    
+
     # Запуск сервисов
     info "Запуск сервисов..."
     docker-compose up -d
-    
+
     # Ожидание запуска
+    info "Ожидание запуска сервисов..."
     sleep 10
-    
+
     # Проверка статуса
     info "Проверка статуса сервисов..."
     docker-compose ps
-    
+
     # Проверка логов
     info "Проверка логов приложения:"
-    docker-compose logs --tail=10 app
-    
+    docker-compose logs --tail=20 app
+
     success "Приложение развернуто"
+}
+
+# Проверка доступности
+check_availability() {
+    info "Проверка доступности приложения..."
+
+    # Ждем еще немного для полного запуска
+    sleep 5
+
+    if curl -s -f -k "https://$DOMAIN" >/dev/null 2>&1; then
+        success "Приложение доступно по адресу: https://$DOMAIN"
+    elif curl -s -f "http://$DOMAIN" >/dev/null 2>&1; then
+        warning "Приложение доступно по HTTP, но HTTPS не работает"
+        warning "Проверьте конфигурацию SSL сертификатов"
+    else
+        warning "Приложение может быть недоступно"
+        info "Проверьте логи: docker-compose logs -f"
+    fi
 }
 
 # Финальная информация
@@ -496,54 +374,33 @@ show_final_info() {
     echo ""
     success "🎉 Развертывание завершено!"
     echo ""
-    
-    if [ "$USE_HTTPS" = true ]; then
-        info "Приложение доступно по адресу:"
-        echo "   🌐 HTTPS: https://$DOMAIN"
-        echo "   🔄 HTTP автоматически перенаправляется на HTTPS"
-        echo ""
-        info "SSL сертификат:"
-        echo "   📅 Автообновление: Включено (ежедневно в 12:00)"
-        echo "   📋 Скрипт обновления: ./renew-cert.sh"
-    else
-        info "Приложение доступно по адресу:"
-        echo "   🌐 HTTP: http://$SERVER_IP"
-    fi
-    
+
+    info "Приложение доступно по адресу:"
+    echo "   🌐 HTTPS: https://$DOMAIN"
     echo ""
+
     info "Управление приложением:"
     echo "   📊 Статус:          docker-compose ps"
     echo "   📋 Логи:            docker-compose logs -f"
     echo "   🔄 Перезапуск:      docker-compose restart"
     echo "   ⏹️  Остановка:       docker-compose down"
-    echo "   🔧 Обновление:      git pull && docker-compose restart"
+    echo "   🔧 Обновление:      ./update.sh"
     echo ""
-    
-    if [ ${#missing_files[@]} -gt 0 ]; then
-        warning "Не забудьте добавить файлы шаблонов для полной функциональности:"
-        for file in "${missing_files[@]}"; do
-            echo "   - $file"
-        done
-        echo ""
-    fi
-    
-    info "Первый вход в систему:"
-    echo "   1. Откройте приложение в браузере"
-    echo "   2. Используйте логин/пароль из .env файла"
-    echo "   3. Настройте 2FA отсканировав QR-код"
+
+    info "Для обновления приложения используйте:"
+    echo "   ./update.sh"
     echo ""
-    
-    warning "Убедитесь что порты 80 и 443 открыты в брандмауэре!"
 }
 
 # Основная функция
 main() {
     check_requirements
-    get_user_settings
-    setup_project
-    setup_nginx
-    setup_ssl
+    check_git_branch
+    check_project_files
+    setup_ssl_certs
+    stop_system_nginx
     deploy_app
+    check_availability
     show_final_info
 }
 
