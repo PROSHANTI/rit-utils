@@ -38,10 +38,12 @@ services:
       sh -c "
       if [ -z \"$$NGINX_SERVER_NAME\" ]; then
         echo '⚠️  WARNING: NGINX_SERVER_NAME is not set. Using default value.';
-        export NGINX_SERVER_NAME='localhost';
+        NGINX_SERVER_NAME='localhost';
       fi;
+      echo \"Processing template with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME\";
       envsubst '$$NGINX_SERVER_NAME' < /etc/nginx/conf.d/rit-utils.conf.template > /etc/nginx/conf.d/rit-utils.conf;
-      echo '✓ Nginx config generated with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME';
+      echo \"✓ Nginx config generated\";
+      cat /etc/nginx/conf.d/rit-utils.conf | grep server_name;
       nginx -g 'daemon off;'
       "
     networks:
