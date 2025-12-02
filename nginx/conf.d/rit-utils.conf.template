@@ -1,6 +1,3 @@
-# ВНИМАНИЕ: Этот файл будет автоматически заменен сгенерированным файлом из шаблона rit-utils.conf.template
-# при запуске Docker контейнера. Используйте переменную NGINX_SERVER_NAME в .env файле для настройки server_name.
-#
 # Upstream для FastAPI приложения
 upstream fastapi_backend {
     server app:8000;
@@ -9,7 +6,7 @@ upstream fastapi_backend {
 # HTTP сервер (временно, пока не настроен HTTPS)
 server {
     listen 80;
-    server_name ritclinic-utils.ru 51.250.123.52;
+    server_name ${NGINX_SERVER_NAME};
 
     # Лимиты
     client_max_body_size 20M;

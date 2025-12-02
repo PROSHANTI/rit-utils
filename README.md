@@ -53,6 +53,7 @@
    - `LOGIN` и `PASSWORD` - учетные данные для входа
    - `SEND_FROM` и `EMAIL_PASS` - настройки почты
    - `JWT_SECRET_KEY` - секретный ключ для JWT
+   - `NGINX_SERVER_NAME` - имя сервера для NGINX и IP
 
 5. Теперь вы можете войти в систему, используя заданные LOGIN и PASSWORD
 
@@ -88,21 +89,21 @@ docker-compose down
 
 ### Переменные окружения (.env)
 ```bash
-# Email настройки
 SEND_FROM=your_email@yandex.ru
 EMAIL_PASS=your_password
 ADDR_TO=recipient@example.com
 BCC_TO=bcc@example.com
 
-# Учетные данные для входа
 LOGIN=admin
 PASSWORD=your-admin-password
 
-# JWT настройки
 JWT_SECRET_KEY=your-super-secret-jwt-key-here
+NGINX_SERVER_NAME=localhost
 ```
 
-**Примечание**: JWT токены истекают через 15 минут, refresh токены - через 7 дней. Эти настройки жестко закодированы в коде.
+**Примечание**:
+- JWT токены истекают через 15 минут, refresh токены - через 7 дней. Эти настройки жестко закодированы в коде.
+- `NGINX_SERVER_NAME` используется для автоматической генерации конфигурации nginx из шаблона. Укажите домен и IP адрес вашего сервера.
 
 ## 🧪 Тестирование
 
@@ -150,12 +151,6 @@ tests/
 - ✅ **pytest-cov** для анализа покрытия кода
 - ✅ **HTML отчеты** о покрытии в `htmlcov/`
 
-## 📚 Документация
-
-После запуска приложения доступна автоматически сгенерированная документация API:
-- Swagger UI: [/docs](http://localhost:8000/docs)
-- ReDoc: [/redoc](http://localhost:8000/redoc)
-
 ## 🔐 Процесс аутентификации
 
 1. **Вход** → Введите логин/пароль из переменных окружения
@@ -182,69 +177,6 @@ tests/
 **Создание карточек:**
 
 ![Создание карточек](screenshots/doctor_form.png)
-
-## 🏗️ Структура проекта
-```
-rit-utils/
-├── src/                          # Исходный код приложения
-│   ├── main.py                  # Основное FastAPI приложение
-│   ├── config.py                # Конфигурация и загрузка переменных окружения
-│   ├── auth/                    # Модуль аутентификации
-│   │   ├── __init__.py          # Экспорт функций авторизации
-│   │   ├── login.py             # JWT авторизация и сессии
-│   │   └── cookie_utils.py      # Утилиты для работы с cookies
-│   └── utils/                   # Утилиты
-│       ├── __init__.py          # Экспорт утилит
-│       ├── doctor_form/         # Модуль генерации карточек врача
-│       │   └── doctor_form_handler.py  # Обработчик формы врача
-│       ├── gen_cert/            # Модуль генерации сертификатов
-│       │   └── gen_cert_handler.py     # Обработчик сертификатов
-│       └── send_email/          # Модуль отправки email
-│           ├── email_handler.py        # Обработчик отправки email
-│           └── email_templates_examples.py # Примеры шаблонов
-├── templates/                   # Jinja2 шаблоны
-│   ├── css/                     # Стили CSS
-│   │   ├── style_home.css       # Стили главной страницы
-│   │   ├── style_login.css      # Стили страниц входа
-│   │   └── style_utils.css      # Стили утилит
-│   ├── login.html               # Страница входа
-│   ├── home.html                # Главная страница
-│   ├── send_email.html          # Отправка email
-│   ├── gen_rit_cert.html        # Генерация сертификатов
-│   ├── doctor_form.html         # Форма врача
-│   ├── footer.html              # Подвал страниц
-│   └── token-refresh.js         # Обновление JWT токенов
-├── tests/                       # Тесты (106 тестов, 83% покрытие)
-│   ├── conftest.py              # Фикстуры и конфигурация pytest
-│   ├── test_auth_login.py       # Тесты аутентификации
-│   ├── test_auth_cookie_utils.py # Тесты cookie утилит
-│   ├── test_config.py           # Тесты конфигурации
-│   ├── test_main.py             # Тесты основного модуля
-│   ├── test_integration_endpoints.py # Интеграционные тесты API
-│   ├── test_utils_doctor_form.py # Тесты форм врачей
-│   ├── test_utils_email.py      # Тесты отправки email
-│   └── test_utils_gen_cert.py   # Тесты генерации сертификатов
-├── screenshots/                 # Скриншоты приложения
-│   ├── auth.png                 # Страница авторизации
-│   ├── home.png                 # Главная страница
-│   ├── send_email.png           # Отправка email
-│   ├── gen_cert.png             # Генерация сертификатов
-│   └── doctor_form.png          # Форма врача
-├── nginx/                      # Конфигурация Nginx
-│   ├── nginx.conf              # Основная конфигурация Nginx
-│   └── conf.d/                 # Конфигурации виртуальных хостов
-│       └── rit-utils.conf      # Конфигурация для приложения
-├── .env.examples               # Пример конфигурации переменных окружения
-├── docker-compose.yml          # Docker Compose конфигурация
-├── Dockerfile                  # Docker образ приложения
-├── update.sh                   # Скрипт обновления приложения (автоопределение окружения)
-├── pytest.ini                 # Конфигурация pytest
-├── TESTING.md                  # Документация по тестированию
-├── pyproject.toml              # Конфигурация Poetry
-├── poetry.lock                 # Зафиксированные версии зависимостей
-├── LICENSE                     # Лицензия Apache 2.0
-└── README.md                   # Документация проекта
-```
 
 ### 📋 Дополнительные файлы (не в репозитории)
 
