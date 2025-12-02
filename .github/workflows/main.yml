@@ -51,6 +51,7 @@ jobs:
         EMAIL_PASS: test_password
         ADDR_TO: test@example.com
         BCC_TO: test@example.com
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         poetry run pytest
 
@@ -193,14 +194,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy
     if: |
-      always() && (
+      needs.deploy.result == 'success' && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
       )
 
     steps:
       - name: Send success message
-        if: success()
         uses: appleboy/telegram-action@master
         with:
           to: ${{ secrets.TELEGRAM_TO }}
@@ -210,46 +210,23 @@ jobs:
             Ветка: ${{ github.ref_name }}
             Коммит: ${{ github.sha }}
 
-      - name: Send failure message
-        if: failure()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: |
-            ❌ Деплой на прод завершился с ошибкой!
-            Ветка: ${{ github.ref_name }}
-            Коммит: ${{ github.sha }}
-
   send_message_test:
     name: Send Telegram notification (test)
     runs-on: ubuntu-latest
     needs: deploy_test
     if: |
-      always() && (
+      needs.deploy_test.result == 'success' && (
         (github.event_name == 'push' && github.ref == 'refs/heads/test') ||
         (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'test')
       )
 
     steps:
       - name: Send success message
-        if: success()
         uses: appleboy/telegram-action@master
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             ✅ Деплой на тест успешно выполнен!
-            Ветка: ${{ github.ref_name }}
-            Коммит: ${{ github.sha }}
-
-      - name: Send failure message
-        if: failure()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: |
-            ❌ Деплой на тест завершился с ошибкой!
             Ветка: ${{ github.ref_name }}
             Коммит: ${{ github.sha }}
