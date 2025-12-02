@@ -2,7 +2,7 @@ import datetime
 import base64
 
 import uvicorn
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -20,6 +20,7 @@ from src.auth import (
 from src.utils.send_email.email_handler import send_email_handler
 from src.utils.doctor_form.doctor_form_handler import doctor_form_handler
 from src.utils.gen_cert.gen_cert_handler import gen_cert_handler
+from src.utils.remove_bg.remove_bg_handler import remove_bg_handler
 
 
 date_now = datetime.datetime.now().strftime("%d.%m.%y")
@@ -200,6 +201,46 @@ def doctor_form_endpoint(
         patient_3=patient_3,
         patient_4=patient_4,
         date=date
+    )
+
+
+@app.get("/remove_bg",
+         dependencies=dependencies,
+         tags=['Удаление фона'],
+         summary='Страница удаления фона с изображений'
+         )
+def remove_bg_page(request: Request):
+    encoded_status = request.cookies.get("remove_bg_status")
+    status = None
+    if encoded_status:
+        try:
+            status = base64.b64decode(encoded_status.encode('ascii')).decode('utf-8')
+        except Exception as e:
+            status = f"Ошибка декодирования статуса, {e}"
+
+    response = templates.TemplateResponse(
+        request, "remove_bg.html", {"status": status}
+        )
+    if encoded_status:
+        response.delete_cookie("remove_bg_status")
+    return response
+
+@app.post("/remove_bg",
+         dependencies=dependencies,
+         tags=['Удаление фона'],
+         summary='Удалить фон с изображения'
+         )
+def remove_bg_endpoint(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    color: str | None = Form(None)
+):
+    return remove_bg_handler(
+        request=request,
+        background_tasks=background_tasks,
+        file=file,
+        color=color
     )
 
 
