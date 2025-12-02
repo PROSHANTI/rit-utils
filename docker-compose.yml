@@ -39,12 +39,9 @@ services:
       sh -c "
       if [ -z \"$$NGINX_SERVER_NAME\" ]; then
         echo '⚠️  WARNING: NGINX_SERVER_NAME is not set. Using default value.';
-        NGINX_SERVER_NAME='localhost';
+        export NGINX_SERVER_NAME='localhost';
       fi;
-      if [ -z \"$$NGINX_DOMAIN\" ]; then
-        echo '⚠️  WARNING: NGINX_DOMAIN is not set. Extracting from NGINX_SERVER_NAME.';
-        NGINX_DOMAIN=$$(echo $$NGINX_SERVER_NAME | awk '{print $$1}');
-      fi;
+      export NGINX_DOMAIN=$${NGINX_DOMAIN:-$$(echo $$NGINX_SERVER_NAME | awk '{print $$1}')};
       echo \"Processing template with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME, NGINX_DOMAIN=$$NGINX_DOMAIN\";
       envsubst '$$NGINX_SERVER_NAME $$NGINX_DOMAIN' < /etc/nginx/conf.d/rit-utils.conf.template > /etc/nginx/conf.d/rit-utils.conf;
       echo \"✓ Nginx config generated\";
