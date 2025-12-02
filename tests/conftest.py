@@ -1,9 +1,15 @@
 import os
+import sys
 import pytest
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import Request
+
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 os.environ.update({
     'JWT_SECRET_KEY': 'test_secret_key_for_jwt_tokens_12345',
@@ -15,6 +21,28 @@ os.environ.update({
     'ADDR_TO': 'recipient@example.com',
     'BCC_TO': 'bcc@example.com'
 })
+
+# Mock для отсутствующего модуля email_templates
+# Создаем фиктивный модуль до импорта email_handler
+if 'src.utils.send_email.email_templates' not in sys.modules:
+    from types import ModuleType
+
+    def get_email_template():
+        """Mock function for email template"""
+        return (
+            'Добрый вечер!\n'
+            '\n'
+            '{body_cashless}'
+            '{body_card}'
+            '{body_qr}'
+            '{body_cash}'
+            '\n'
+            'С уважением'
+        )
+
+    email_templates_module = ModuleType('src.utils.send_email.email_templates')
+    setattr(email_templates_module, 'get_email_template', get_email_template)
+    sys.modules['src.utils.send_email.email_templates'] = email_templates_module
 
 
 @pytest.fixture(scope="session")
