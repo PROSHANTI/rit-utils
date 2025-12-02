@@ -200,6 +200,20 @@ jobs:
       )
 
     steps:
+      - name: Get commit message
+        id: commit_info
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            COMMIT_MSG="${{ github.event.pull_request.title }}"
+          else
+            COMMIT_MSG="N/A"
+          fi
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Send success message
         uses: appleboy/telegram-action@master
         with:
@@ -209,6 +223,7 @@ jobs:
             ✅ Деплой на прод успешно выполнен!
             Ветка: ${{ github.ref_name }}
             Коммит: ${{ github.sha }}
+            Описание: ${{ steps.commit_info.outputs.message }}
 
   send_message_test:
     name: Send Telegram notification (test)
@@ -221,6 +236,20 @@ jobs:
       )
 
     steps:
+      - name: Get commit message
+        id: commit_info
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            COMMIT_MSG="${{ github.event.pull_request.title }}"
+          else
+            COMMIT_MSG="N/A"
+          fi
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Send success message
         uses: appleboy/telegram-action@master
         with:
@@ -230,3 +259,4 @@ jobs:
             ✅ Деплой на тест успешно выполнен!
             Ветка: ${{ github.ref_name }}
             Коммит: ${{ github.sha }}
+            Описание: ${{ steps.commit_info.outputs.message }}
