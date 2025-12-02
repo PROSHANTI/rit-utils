@@ -107,7 +107,7 @@ NGINX_SERVER_NAME=localhost
 
 ## 🧪 Тестирование
 
-Проект включает комплексную систему тестирования с **78 тестами**
+Проект включает комплексную систему тестирования с **100 тестами**
 
 ### 📋 Прямое использование pytest
 
@@ -120,9 +120,6 @@ poetry run pytest tests/test_auth_login.py
 
 # Конкретный тест
 poetry run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success
-
-# С покрытием кода
-poetry run pytest --cov=src --cov-report=html
 ```
 
 ### 🗂️ Структура тестов
@@ -130,26 +127,24 @@ poetry run pytest --cov=src --cov-report=html
 ```
 tests/
 ├── conftest.py                     # Фикстуры и конфигурация pytest
-├── test_auth_login.py              # 17 тестов аутентификации
-├── test_auth_two_factor.py         # 18 тестов 2FA
-├── test_auth_cookie_utils.py       # 4 теста cookie утилит
-├── test_utils_email.py             # 8 тестов отправки email
-├── test_utils_gen_cert.py          # 13 тестов генерации сертификатов
-├── test_utils_doctor_form.py       # 11 тестов форм врачей
-├── test_integration_endpoints.py   # 25 интеграционных тестов API
-├── test_main.py                    # 10 тестов основного модуля
-├── test_config.py                  # 2 теста конфигурации
+├── test_auth_login.py              # Тесты аутентификации
+├── test_auth_cookie_utils.py       # Тесты cookie утилит
+├── test_utils_email.py             # Тесты отправки email
+├── test_utils_gen_cert.py          # Тесты генерации сертификатов
+├── test_utils_doctor_form.py       # Тесты форм врачей
+├── test_utils_remove_bg.py        # Тесты удаления фона с изображений
+├── test_integration_endpoints.py   # Интеграционные тесты API
+├── test_main.py                    # Тесты основного модуля
+├── test_config.py                  # Тесты конфигурации
 └── README.md                       # Документация по тестам
 ```
 
 ### ✨ Особенности тестирования
 
 - ✅ **Без запуска сервера** - все тесты работают изолированно
-- ✅ **Полное мокирование** внешних зависимостей (SMTP, LibreOffice, файлы)
+- ✅ **Полное мокирование** внешних зависимостей (SMTP, LibreOffice, OpenCV, файлы)
 - ✅ **Тестовые переменные** окружения для безопасности
 - ✅ **Автоматическая очистка** состояния между тестами
-- ✅ **pytest-cov** для анализа покрытия кода
-- ✅ **HTML отчеты** о покрытии в `htmlcov/`
 
 ## 🔐 Процесс аутентификации
 
@@ -207,7 +202,6 @@ tests/
 - **pytest** (^8.4.1) - фреймворк тестирования
 - **pytest-asyncio** (^1.1.0) - поддержка async тестов
 - **pytest-mock** (^3.14.1) - мокирование в тестах
-- **pytest-cov** (^6.2.1) - анализ покрытия кода
 - **httpx** (^0.28.1) - HTTP клиент для тестирования
 
 Полный список зависимостей можно найти в [pyproject.toml](./pyproject.toml)
