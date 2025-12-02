@@ -168,6 +168,7 @@ button:hover {
     font-weight: 800;
     background: linear-gradient(45deg, #ff416c, #ff4b2b);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     text-shadow: 0 2px 10px rgba(255, 75, 43, 0.2);
 }
@@ -179,11 +180,73 @@ button:hover {
     text-align: center;
 }
 
+.color-picker-group {
+    margin-bottom: 20px;
+}
+
+.color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+input[type="color"] {
+    width: 60px;
+    height: 40px;
+    border: 2px solid #444;
+    border-radius: 8px;
+    cursor: pointer;
+    background: transparent;
+    padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 6px;
+}
+
+.color-rgb-display {
+    flex: 1;
+    padding: 12px 15px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: rgba(20, 20, 20, 0.7);
+    color: #fff;
+    font-size: 1rem;
+    font-family: monospace;
+}
+
+.file-input-wrapper {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+input[type="file"] {
+    width: 100%;
+    padding: 12px 15px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: rgba(20, 20, 20, 0.7);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+input[type="file"]:focus {
+    outline: none;
+    border-color: #ff416c;
+    box-shadow: 0 0 0 3px rgba(255, 65, 108, 0.3);
+}
+
 @media (max-width: 480px) {
     .login-container {
         padding: 20px;
     }
-    
+
     h1 {
         font-size: 2rem;
     }

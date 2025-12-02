@@ -79,7 +79,7 @@ body {
     flex-wrap: wrap;
     justify-content: center;
     gap: 30px;
-    max-width: 1200px;
+    max-width: 1300px;
     margin-top: 20px;
 }
 
@@ -146,12 +146,12 @@ body {
         flex-direction: column;
         align-items: center;
     }
-    
+
     .square {
         width: 100%;
         max-width: 350px;
     }
-    
+
     .logo span {
         font-size: 3rem;
     }
@@ -161,7 +161,7 @@ body {
     .logo span {
         font-size: 2.5rem;
     }
-    
+
     .subtitle {
         font-size: 1rem;
     }

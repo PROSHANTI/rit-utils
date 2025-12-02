@@ -1,7 +1,7 @@
 services:
-  # FastAPI приложение
+  # FastAPI приложение из DockerHub
   app:
-    build: .
+    image: proshanti/rit-utils:${IMAGE_TAG:-latest}
     container_name: rit-utils-app
     restart: unless-stopped
     expose:

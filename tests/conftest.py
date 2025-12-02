@@ -1,14 +1,16 @@
-"""
-Конфигурация pytest для тестов rit-utils
-"""
 import os
+import sys
 import pytest
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import Request
 
-# Устанавливаем тестовые переменные окружения сразу при импорте
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 os.environ.update({
     'JWT_SECRET_KEY': 'test_secret_key_for_jwt_tokens_12345',
     'LOGIN': 'test_admin',
@@ -20,18 +22,38 @@ os.environ.update({
     'BCC_TO': 'bcc@example.com'
 })
 
+# Mock для отсутствующего модуля email_templates
+# Создаем фиктивный модуль до импорта email_handler
+if 'src.utils.send_email.email_templates' not in sys.modules:
+    from types import ModuleType
+
+    def get_email_template():
+        """Mock function for email template"""
+        return (
+            'Добрый вечер!\n'
+            '\n'
+            '{body_cashless}'
+            '{body_card}'
+            '{body_qr}'
+            '{body_cash}'
+            '\n'
+            'С уважением'
+        )
+
+    email_templates_module = ModuleType('src.utils.send_email.email_templates')
+    setattr(email_templates_module, 'get_email_template', get_email_template)
+    sys.modules['src.utils.send_email.email_templates'] = email_templates_module
+
 
 @pytest.fixture(scope="session")
 def test_env():
     """Настройка тестового окружения"""
-    # Переменные уже установлены при импорте модуля
     yield
 
 
 @pytest.fixture
 def app(test_env):
     """Создание тестового FastAPI приложения"""
-    # Импортируем приложение после установки переменных окружения
     from src.main import app
     return app
 
@@ -92,7 +114,6 @@ def mock_pptx():
         mock_paragraph = MagicMock()
         mock_run = MagicMock()
 
-        # Настройка цепочки моков
         mock_presentation.slides = [mock_slide]
         mock_slide.shapes = [mock_shape]
         mock_shape.has_text_frame = True
@@ -122,8 +143,4 @@ def reset_revoked_tokens():
     yield
     REVOKED_TOKENS.clear()
 
-
-
-
-# Настройка pytest-asyncio
 pytest_plugins = ('pytest_asyncio',)

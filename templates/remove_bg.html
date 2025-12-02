@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RIT-UTILS</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/css/style_utils.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="send-email-container">
+        <div class="logo">
+            <span>REMOVE BG</span>
+        </div>
+        <form action="/remove_bg" method="post" enctype="multipart/form-data" autocomplete="off">
+            <div class="form-group file-input-wrapper">
+                <label for="file">Файл</label>
+                <input type="file" id="file" name="file" accept="image/*" required>
+            </div>
+
+            <div class="form-group color-picker-group">
+                <label for="color">Цвет текста</label>
+                <div class="color-picker-wrapper">
+                    <input type="color" id="colorPicker" value="#000000">
+                    <input type="text" id="color" name="color" class="color-rgb-display" value="0,0,0" readonly>
+                </div>
+            </div>
+
+            {% if status %}
+            <div class="form-group">
+                <p class="status-message status-error">{{ status }}</p>
+            </div>
+            {% endif %}
+
+            <button type="submit">Обработать</button>
+        </form>
+    </div>
+{% include 'footer.html' %}
+<script src="/static/token-refresh.js"></script>
+<script>
+    const colorPicker = document.getElementById('colorPicker');
+    const colorInput = document.getElementById('color');
+
+    colorPicker.addEventListener('input', function() {
+        const hex = this.value;
+        const r = parseInt(hex.substr(1, 2), 16);
+        const g = parseInt(hex.substr(3, 2), 16);
+        const b = parseInt(hex.substr(5, 2), 16);
+        colorInput.value = `${r},${g},${b}`;
+    });
+
+    colorInput.addEventListener('input', function() {
+        const rgb = this.value.split(',').map(v => parseInt(v.trim()));
+        if (rgb.length === 3 && rgb.every(v => !isNaN(v) && v >= 0 && v <= 255)) {
+            const hex = '#' + rgb.map(v => {
+                const hex = v.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+            colorPicker.value = hex;
+        }
+    });
+</script>
+</body>
+</html>

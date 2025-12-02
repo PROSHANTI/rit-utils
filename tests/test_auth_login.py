@@ -1,48 +1,48 @@
 """
-Тесты для модуля аутентификации login.py
+Tests for login.py authentication module
 """
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from fastapi import Request, Form
+from fastapi import Form, Request
 from fastapi.responses import RedirectResponse
 
 from src.auth.login import (
+    REVOKED_TOKENS,
+    check_auth_status,
     login_handler,
     logout_handler,
     refresh_token_handler,
-    check_auth_status,
-    REVOKED_TOKENS
 )
 
 
 class TestLoginHandler:
-    """Тесты для обработчика входа"""
+    """Tests for login handler"""
 
     def test_login_success(self, mock_request):
-        """Тест успешного входа"""
+        """Test successful login"""
         result = login_handler(mock_request, "test_admin", "test_password")
 
-        # Проверяем, что результат - это редирект на главную страницу
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/home"
         assert result.status_code == 303
 
     def test_login_invalid_credentials(self, mock_request):
-        """Тест входа с неверными учетными данными"""
+        """Test login with invalid credentials"""
         result = login_handler(mock_request, "wrong_user", "wrong_pass")
 
         assert hasattr(result, 'status_code')
         assert result.status_code == 401
 
     def test_login_invalid_username(self, mock_request):
-        """Тест входа с неверным именем пользователя"""
+        """Test login with invalid username"""
         result = login_handler(mock_request, "wrong_user", "test_password")
 
         assert hasattr(result, 'status_code')
         assert result.status_code == 401
 
     def test_login_invalid_password(self, mock_request):
-        """Тест входа с неверным паролем"""
+        """Test login with invalid password"""
         result = login_handler(mock_request, "test_admin", "wrong_pass")
 
         assert hasattr(result, 'status_code')
@@ -50,10 +50,10 @@ class TestLoginHandler:
 
 
 class TestLogoutHandler:
-    """Тесты для обработчика выхода"""
+    """Tests for logout handler"""
 
     def test_logout_with_refresh_token(self, mock_request):
-        """Тест выхода с refresh токеном"""
+        """Test logout with refresh token"""
         test_token = "test_refresh_token"
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
 
@@ -65,7 +65,7 @@ class TestLogoutHandler:
         assert test_token in REVOKED_TOKENS
 
     def test_logout_without_refresh_token(self, mock_request):
-        """Тест выхода без refresh токена"""
+        """Test logout without refresh token"""
         mock_request.cookies = {}
 
         result = logout_handler(mock_request)
@@ -76,10 +76,10 @@ class TestLogoutHandler:
 
 
 class TestRefreshTokenHandler:
-    """Тесты для обработчика обновления токена"""
+    """Tests for token refresh handler"""
 
     def test_refresh_token_missing(self, mock_request):
-        """Тест обновления токена без токена"""
+        """Test token refresh without token"""
         mock_request.cookies = {}
 
         result = refresh_token_handler(mock_request)
@@ -89,7 +89,7 @@ class TestRefreshTokenHandler:
         assert result.status_code == 303
 
     def test_refresh_token_revoked(self, mock_request):
-        """Тест обновления отозванного токена"""
+        """Test refresh of revoked token"""
         test_token = "revoked_token"
         REVOKED_TOKENS.add(test_token)
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
@@ -102,11 +102,10 @@ class TestRefreshTokenHandler:
 
     @patch('src.auth.login.security')
     def test_refresh_token_success(self, mock_security, mock_request):
-        """Тест успешного обновления токена"""
+        """Test successful token refresh"""
         test_token = "valid_refresh_token"
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
 
-        # Настройка мока для декодирования токена
         mock_payload = MagicMock()
         mock_payload.sub = "1"
         mock_payload.jti = "test_jti"
@@ -122,11 +121,10 @@ class TestRefreshTokenHandler:
 
     @patch('src.auth.login.security')
     def test_refresh_token_invalid(self, mock_security, mock_request):
-        """Тест обновления невалидного токена"""
+        """Test refresh of invalid token"""
         test_token = "invalid_token"
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
 
-        # Мок для исключения при декодировании
         mock_security._decode_token.side_effect = Exception("Invalid token")
 
         result = refresh_token_handler(mock_request)
@@ -137,10 +135,10 @@ class TestRefreshTokenHandler:
 
 
 class TestCheckAuthStatus:
-    """Тесты для проверки статуса авторизации"""
+    """Tests for authentication status check"""
 
     def test_check_auth_with_token(self, mock_request):
-        """Тест проверки авторизации с токеном"""
+        """Test auth check with token"""
         mock_request.cookies = {"JWT_ACCESS_TOKEN_COOKIE": "valid_token"}
 
         result = check_auth_status(mock_request)
@@ -150,12 +148,9 @@ class TestCheckAuthStatus:
         assert result.status_code == 303
 
     def test_check_auth_without_token(self, mock_request):
-        """Тест проверки авторизации без токена"""
+        """Test auth check without token"""
         mock_request.cookies = {}
 
         result = check_auth_status(mock_request)
 
-        # Должен вернуть шаблон страницы входа
         assert hasattr(result, 'status_code')
-
-
