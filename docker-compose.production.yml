@@ -1,0 +1,61 @@
+services:
+  # FastAPI приложение из DockerHub
+  app:
+    image: proshanti/rit-utils:${IMAGE_TAG:-latest}
+    container_name: rit-utils-app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    volumes:
+      - ./src/utils/doctor_form:/app/src/utils/doctor_form
+      - ./src/utils/gen_cert:/app/src/utils/gen_cert
+      - ./src/utils/send_email:/app/src/utils/send_email
+    networks:
+      - rit-utils-network
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: rit-utils-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    environment:
+      - NGINX_SERVER_NAME=${NGINX_SERVER_NAME}
+      - NGINX_DOMAIN=${NGINX_DOMAIN:-}
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d/rit-utils.conf.template:/etc/nginx/conf.d/rit-utils.conf.template:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+      - ./certbot-webroot:/var/www/certbot:ro
+    command: >
+      sh -c "
+      if [ -z \"$$NGINX_SERVER_NAME\" ]; then
+        echo '⚠️  WARNING: NGINX_SERVER_NAME is not set. Using default value.';
+        export NGINX_SERVER_NAME='localhost';
+      fi;
+      export NGINX_DOMAIN=$${NGINX_DOMAIN:-$$(echo $$NGINX_SERVER_NAME | awk '{print $$1}')};
+      echo \"Processing template with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME, NGINX_DOMAIN=$$NGINX_DOMAIN\";
+      envsubst '$$NGINX_SERVER_NAME $$NGINX_DOMAIN' < /etc/nginx/conf.d/rit-utils.conf.template > /etc/nginx/conf.d/rit-utils.conf;
+      echo \"✓ Nginx config generated\";
+      cat /etc/nginx/conf.d/rit-utils.conf | grep -E '(server_name|ssl_certificate)';
+      nginx -g 'daemon off;'
+      "
+    networks:
+      - rit-utils-network
+    depends_on:
+      - app
+
+networks:
+  rit-utils-network:
+    driver: bridge
+
+volumes:
+  nginx_logs:
