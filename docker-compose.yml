@@ -27,6 +27,7 @@ services:
       - .env
     environment:
       - NGINX_SERVER_NAME=${NGINX_SERVER_NAME}
+      - NGINX_DOMAIN=${NGINX_DOMAIN:-}
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d/rit-utils.conf.template:/etc/nginx/conf.d/rit-utils.conf.template:ro
@@ -40,10 +41,14 @@ services:
         echo '⚠️  WARNING: NGINX_SERVER_NAME is not set. Using default value.';
         NGINX_SERVER_NAME='localhost';
       fi;
-      echo \"Processing template with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME\";
-      envsubst '$$NGINX_SERVER_NAME' < /etc/nginx/conf.d/rit-utils.conf.template > /etc/nginx/conf.d/rit-utils.conf;
+      if [ -z \"$$NGINX_DOMAIN\" ]; then
+        echo '⚠️  WARNING: NGINX_DOMAIN is not set. Extracting from NGINX_SERVER_NAME.';
+        NGINX_DOMAIN=$$(echo $$NGINX_SERVER_NAME | awk '{print $$1}');
+      fi;
+      echo \"Processing template with NGINX_SERVER_NAME=$$NGINX_SERVER_NAME, NGINX_DOMAIN=$$NGINX_DOMAIN\";
+      envsubst '$$NGINX_SERVER_NAME $$NGINX_DOMAIN' < /etc/nginx/conf.d/rit-utils.conf.template > /etc/nginx/conf.d/rit-utils.conf;
       echo \"✓ Nginx config generated\";
-      cat /etc/nginx/conf.d/rit-utils.conf | grep server_name;
+      cat /etc/nginx/conf.d/rit-utils.conf | grep -E '(server_name|ssl_certificate)';
       nginx -g 'daemon off;'
       "
     networks:
