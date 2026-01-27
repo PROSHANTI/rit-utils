@@ -6,7 +6,7 @@ from fastapi import Request, Form, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from authx import AuthX, AuthXConfig
-from .cookie_utils import set_secure_cookie, delete_secure_cookie
+from .cookie_utils import set_secure_cookie
 from authx.exceptions import JWTDecodeError
 from dotenv import load_dotenv
 
@@ -39,17 +39,14 @@ def login_handler(
     ):
     """Обработчик авторизации"""
     if username == LOGIN and password == PASSWORD:
-        # Сразу создаём JWT токены после успешной авторизации
         response = RedirectResponse(url="/home", status_code=303)
 
-        # Создаём access token
         access_token = security.create_access_token(
             uid='1',
             jti=str(uuid.uuid4())
         )
         set_secure_cookie(response, request, config.JWT_ACCESS_COOKIE_NAME, access_token)
 
-        # Создаём refresh token
         refresh_token = security.create_refresh_token(
             uid='1',
             jti=str(uuid.uuid4())
@@ -160,4 +157,3 @@ def check_auth_status(request: Request):
     if request.cookies.get(config.JWT_ACCESS_COOKIE_NAME):
         return RedirectResponse(url="/home", status_code=303)
     return templates.TemplateResponse(request, "login.html")
-

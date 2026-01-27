@@ -134,54 +134,6 @@ class TestGenCertHandler:
         assert result.headers["location"] == "/gen_rit_cert"
         assert result.status_code == 303
 
-    def test_gen_cert_handler_invalid_price_too_long(self, mock_request):
-        """Test too long price handling"""
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="1234567"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
-    def test_gen_cert_handler_invalid_price_not_number(self, mock_request):
-        """Test non-numeric price value handling"""
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="не число"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
-    def test_gen_cert_handler_zero_price(self, mock_request):
-        """Test zero price handling"""
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="0"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
-    def test_gen_cert_handler_negative_price(self, mock_request):
-        """Test negative price handling"""
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="-100"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
     @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
     @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
     @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
@@ -232,3 +184,102 @@ class TestGenCertHandler:
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/gen_rit_cert"
         assert result.status_code == 303
+
+    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
+    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
+    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
+    def test_gen_cert_handler_numeric_price_adds_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
+        """Test that numeric price gets ₽ symbol added"""
+        mock_exists.return_value = True
+        
+        # Настраиваем мок для проверки замены текста
+        mock_run = MagicMock()
+        mock_run.text = "price"  # Начальный текст содержит ключ для замены
+        mock_paragraph = MagicMock()
+        mock_paragraph.runs = [mock_run]
+        mock_text_frame = MagicMock()
+        mock_text_frame.paragraphs = [mock_paragraph]
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = True
+        mock_shape.text_frame = mock_text_frame
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_presentation_instance = MagicMock()
+        mock_presentation_instance.slides = [mock_slide]
+        mock_presentation.return_value = mock_presentation_instance
+
+        result = gen_cert_handler(
+            request=mock_request,
+            name="Иван Иванов",
+            price="5000"
+        )
+
+        assert isinstance(result, FileResponse)
+        # Проверяем, что текст был заменен на "5000 ₽"
+        assert mock_run.text == "5000 ₽"
+
+    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
+    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
+    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
+    def test_gen_cert_handler_text_price_no_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
+        """Test that text price doesn't get ₽ symbol added"""
+        mock_exists.return_value = True
+        
+        # Настраиваем мок для проверки замены текста
+        mock_run = MagicMock()
+        mock_run.text = "price"  # Начальный текст содержит ключ для замены
+        mock_paragraph = MagicMock()
+        mock_paragraph.runs = [mock_run]
+        mock_text_frame = MagicMock()
+        mock_text_frame.paragraphs = [mock_paragraph]
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = True
+        mock_shape.text_frame = mock_text_frame
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_presentation_instance = MagicMock()
+        mock_presentation_instance.slides = [mock_slide]
+        mock_presentation.return_value = mock_presentation_instance
+
+        result = gen_cert_handler(
+            request=mock_request,
+            name="Иван Иванов",
+            price="бесплатно"
+        )
+
+        assert isinstance(result, FileResponse)
+        # Проверяем, что текст был заменен на "бесплатно" без ₽
+        assert mock_run.text == "бесплатно"
+
+    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
+    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
+    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
+    def test_gen_cert_handler_empty_price_no_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
+        """Test that empty price doesn't get ₽ symbol added"""
+        mock_exists.return_value = True
+        
+        # Настраиваем мок для проверки замены текста
+        mock_run = MagicMock()
+        mock_run.text = "price"  # Начальный текст содержит ключ для замены
+        mock_paragraph = MagicMock()
+        mock_paragraph.runs = [mock_run]
+        mock_text_frame = MagicMock()
+        mock_text_frame.paragraphs = [mock_paragraph]
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = True
+        mock_shape.text_frame = mock_text_frame
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_presentation_instance = MagicMock()
+        mock_presentation_instance.slides = [mock_slide]
+        mock_presentation.return_value = mock_presentation_instance
+
+        result = gen_cert_handler(
+            request=mock_request,
+            name="Иван Иванов",
+            price=""
+        )
+
+        assert isinstance(result, FileResponse)
+        # Проверяем, что текст был заменен на пустую строку без ₽
+        assert mock_run.text == ""
