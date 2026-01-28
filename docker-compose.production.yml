@@ -9,9 +9,12 @@ services:
     env_file:
       - .env
     volumes:
-      - ./src/utils/doctor_form:/app/src/utils/doctor_form
-      - ./src/utils/gen_cert:/app/src/utils/gen_cert
-      - ./src/utils/send_email:/app/src/utils/send_email
+      # Монтируем только шаблоны (не код) - чтобы их можно было менять на сервере без пересборки
+      # Код (gen_cert_handler.py и т.д.) берется из Docker образа
+      - ./src/utils/gen_cert/Сертификат_шаблон.pptx:/app/src/utils/gen_cert/Сертификат_шаблон.pptx:ro
+      - ./src/utils/doctor_form/Бланк Врача.pptx:/app/src/utils/doctor_form/Бланк Врача.pptx:ro
+      - ./src/utils/doctor_form/Бланк врача на печать.pptx:/app/src/utils/doctor_form/Бланк врача на печать.pptx:ro
+      - ./src/utils/send_email/email_templates.py:/app/src/utils/send_email/email_templates.py:ro
     networks:
       - rit-utils-network
 

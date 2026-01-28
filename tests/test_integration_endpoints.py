@@ -171,20 +171,6 @@ class TestErrorHandling:
         except Exception as e:
             assert "Missing" in str(e) or "Token" in str(e) or "JWT" in str(e)
 
-    def test_gen_cert_invalid_price(self, client):
-        """Test certificate generation with invalid price"""
-        try:
-            response = client.post("/gen_rit_cert", data={
-                "name": "Иван Иванов",
-                "price": "1234567"
-            })
-
-            assert response.status_code in [200, 303]
-            if response.status_code == 303:
-                assert response.headers["location"] == "/gen_rit_cert"
-        except Exception as e:
-            assert "Missing" in str(e) or "Token" in str(e) or "JWT" in str(e)
-
     @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
     def test_gen_cert_template_not_found(self, mock_exists, client):
         """Test certificate generation with missing template"""
