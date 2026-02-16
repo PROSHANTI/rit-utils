@@ -3,6 +3,7 @@ import base64
 
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile, BackgroundTasks
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -56,11 +57,13 @@ def refresh_token(request: Request):
     return refresh_token_handler(request)
 
 
-@app.get("/",
-         tags=['Главная страница'],
-         summary='Отображает домашнюю страницу'
-         )
+@app.api_route("/", methods=["GET", "HEAD"],
+               tags=['Главная страница'],
+               summary='Отображает домашнюю страницу'
+               )
 def root(request: Request):
+    if request.method == "HEAD":
+        return Response(status_code=200)
     return check_auth_status(request)
 
 @app.get("/home",

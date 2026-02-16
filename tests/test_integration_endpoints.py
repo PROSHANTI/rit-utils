@@ -18,6 +18,12 @@ class TestAuthEndpoints:
 
         assert response.status_code in [200, 303]
 
+    def test_root_head_returns_200(self, client):
+        """HEAD / для мониторинга (UptimeRobot) — 200 без тела"""
+        response = client.head("/")
+        assert response.status_code == 200
+        assert response.content == b""
+
     def test_login_invalid_credentials(self, client):
         """Test login with invalid credentials"""
         response = client.post("/login", data={
