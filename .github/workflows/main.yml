@@ -96,7 +96,7 @@ jobs:
 
   deploy:
     name: Deploy to production server
-    runs-on: [self-hosted, prod]
+    runs-on: ubuntu-latest
     needs: build_and_push_to_docker_hub
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -106,27 +106,44 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy
-        env:
-          DEPLOY_DIR: /home/${{ secrets.USER }}/rit-utils
-          IMAGE_TAG: main-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE_TAG="${IMAGE_TAG:0:12}"
+      - name: Copy docker-compose.production.yml via SSH
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST_PROD }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: "docker-compose.production.yml"
+          target: "/home/${{ secrets.USER }}/rit-utils"
 
-          mkdir -p "${DEPLOY_DIR}/nginx/conf.d"
-          cp -f docker-compose.production.yml "${DEPLOY_DIR}/"
-          cp -rf nginx "${DEPLOY_DIR}/"
+      - name: Copy nginx config via SSH
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST_PROD }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: "nginx/"
+          target: "/home/${{ secrets.USER }}/rit-utils"
 
-          cd "${DEPLOY_DIR}"
-          export IMAGE_TAG
-          docker compose -f docker-compose.production.yml pull
-          docker compose -f docker-compose.production.yml up -d --remove-orphans
-          docker compose -f docker-compose.production.yml ps
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_PROD }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            cd /home/${{ secrets.USER }}/rit-utils
+            export IMAGE_TAG=main-$(echo '${{ github.sha }}' | cut -c1-7)
+            docker-compose -f docker-compose.production.yml pull
+            docker-compose -f docker-compose.production.yml down
+            docker-compose -f docker-compose.production.yml up -d
+            docker-compose -f docker-compose.production.yml ps
 
   deploy_test:
     name: Deploy to test server
-    runs-on: [self-hosted, test]
+    runs-on: ubuntu-latest
     needs: build_and_push_to_docker_hub
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/test') ||
@@ -136,23 +153,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy
-        env:
-          DEPLOY_DIR: /home/${{ secrets.USER }}/rit-utils
-          IMAGE_TAG: test-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE_TAG="${IMAGE_TAG:0:12}"
+      - name: Copy docker-compose.production.yml via SSH
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST_TEST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: "docker-compose.production.yml"
+          target: "/home/${{ secrets.USER }}/rit-utils"
 
-          mkdir -p "${DEPLOY_DIR}/nginx/conf.d"
-          cp -f docker-compose.production.yml "${DEPLOY_DIR}/"
-          cp -rf nginx "${DEPLOY_DIR}/"
+      - name: Copy nginx config via SSH
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST_TEST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: "nginx/"
+          target: "/home/${{ secrets.USER }}/rit-utils"
 
-          cd "${DEPLOY_DIR}"
-          export IMAGE_TAG
-          docker compose -f docker-compose.production.yml pull
-          docker compose -f docker-compose.production.yml up -d --remove-orphans
-          docker compose -f docker-compose.production.yml ps
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_TEST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            cd /home/${{ secrets.USER }}/rit-utils
+            export IMAGE_TAG=test-$(echo '${{ github.sha }}' | cut -c1-7)
+            docker-compose -f docker-compose.production.yml pull
+            docker-compose -f docker-compose.production.yml down
+            docker-compose -f docker-compose.production.yml up -d
+            docker-compose -f docker-compose.production.yml ps
 
   send_message_prod:
     name: Send Telegram notification (production)
