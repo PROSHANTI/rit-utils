@@ -136,10 +136,16 @@ jobs:
           script: |
             cd /home/${{ secrets.USER }}/rit-utils
             export IMAGE_TAG=main-$(echo '${{ github.sha }}' | cut -c1-7)
-            docker-compose -f docker-compose.production.yml pull
-            docker-compose -f docker-compose.production.yml down
-            docker-compose -f docker-compose.production.yml up -d
-            docker-compose -f docker-compose.production.yml ps
+            if docker compose version >/dev/null 2>&1; then
+              DC="docker compose"
+            else
+              DC="docker-compose"
+            fi
+            $DC -f docker-compose.production.yml pull
+            $DC -f docker-compose.production.yml down --remove-orphans
+            docker rm -f rit-utils-app rit-utils-nginx 2>/dev/null || true
+            $DC -f docker-compose.production.yml up -d
+            $DC -f docker-compose.production.yml ps
 
   deploy_test:
     name: Deploy to test server
@@ -183,10 +189,16 @@ jobs:
           script: |
             cd /home/${{ secrets.USER }}/rit-utils
             export IMAGE_TAG=test-$(echo '${{ github.sha }}' | cut -c1-7)
-            docker-compose -f docker-compose.production.yml pull
-            docker-compose -f docker-compose.production.yml down
-            docker-compose -f docker-compose.production.yml up -d
-            docker-compose -f docker-compose.production.yml ps
+            if docker compose version >/dev/null 2>&1; then
+              DC="docker compose"
+            else
+              DC="docker-compose"
+            fi
+            $DC -f docker-compose.production.yml pull
+            $DC -f docker-compose.production.yml down --remove-orphans
+            docker rm -f rit-utils-app rit-utils-nginx 2>/dev/null || true
+            $DC -f docker-compose.production.yml up -d
+            $DC -f docker-compose.production.yml ps
 
   send_message_prod:
     name: Send Telegram notification (production)
