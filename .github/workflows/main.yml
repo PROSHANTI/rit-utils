@@ -107,27 +107,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup SSH
+      - name: Copy files and deploy
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          eval "$(ssh-agent -s)"
-          echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}" >> "$GITHUB_ENV"
-          echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "$GITHUB_ENV"
-
-          if [ -n "${SSH_PASSPHRASE:-}" ]; then
-            echo "$SSH_PASSPHRASE" | ssh-add ~/.ssh/deploy_key
-          else
-            ssh-add ~/.ssh/deploy_key
-          fi
-
-      - name: Copy files and deploy
-        env:
           DEPLOY_HOST: ${{ secrets.HOST_PROD }}
           DEPLOY_USER: ${{ secrets.USER }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
@@ -135,26 +118,56 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${DEPLOY_HOST:-}" ] || [ -z "${DEPLOY_USER:-}" ]; then
+            echo "::error::DEPLOY_HOST and DEPLOY_USER must be configured in repository secrets"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          eval "$(ssh-agent -s)"
+          if [ -n "${SSH_PASSPHRASE:-}" ]; then
+            echo "$SSH_PASSPHRASE" | ssh-add ~/.ssh/deploy_key
+          else
+            ssh-add ~/.ssh/deploy_key
+          fi
+
           SSH_PORT="${SSH_PORT:-22}"
           REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
           REMOTE_DIR="/home/${DEPLOY_USER}/rit-utils"
-          SSH_OPTS="-p ${SSH_PORT} -o ConnectTimeout=60 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new"
+          SSH_OPTS="-p ${SSH_PORT} -o ConnectTimeout=60 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
           IMAGE_TAG="${IMAGE_TAG:0:12}"
 
-          ssh-keyscan -p "${SSH_PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+          echo "Deploying to ${REMOTE}:${REMOTE_DIR} with IMAGE_TAG=${IMAGE_TAG}"
 
+          ssh-keyscan -T 15 -p "${SSH_PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts 2>/dev/null \
+            || echo "Warning: ssh-keyscan could not fetch host key, continuing with accept-new"
+
+          echo "Creating remote directories..."
           ssh ${SSH_OPTS} "${REMOTE}" "mkdir -p ${REMOTE_DIR}/nginx/conf.d"
+
+          echo "Copying docker-compose.production.yml..."
           scp ${SSH_OPTS} docker-compose.production.yml "${REMOTE}:${REMOTE_DIR}/"
+
+          echo "Copying nginx config..."
           scp ${SSH_OPTS} -r nginx "${REMOTE}:${REMOTE_DIR}/"
 
+          echo "Running docker-compose on remote server..."
           ssh ${SSH_OPTS} "${REMOTE}" bash -s <<EOF
           set -euo pipefail
           cd "${REMOTE_DIR}"
           export IMAGE_TAG="${IMAGE_TAG}"
-          docker-compose -f docker-compose.production.yml pull
-          docker-compose -f docker-compose.production.yml down
-          docker-compose -f docker-compose.production.yml up -d
-          docker-compose -f docker-compose.production.yml ps
+          if command -v docker-compose >/dev/null 2>&1; then
+            DC="docker-compose"
+          else
+            DC="docker compose"
+          fi
+          \$DC -f docker-compose.production.yml pull
+          \$DC -f docker-compose.production.yml down
+          \$DC -f docker-compose.production.yml up -d
+          \$DC -f docker-compose.production.yml ps
           EOF
 
   deploy_test:
@@ -169,27 +182,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup SSH
+      - name: Copy files and deploy
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          eval "$(ssh-agent -s)"
-          echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}" >> "$GITHUB_ENV"
-          echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "$GITHUB_ENV"
-
-          if [ -n "${SSH_PASSPHRASE:-}" ]; then
-            echo "$SSH_PASSPHRASE" | ssh-add ~/.ssh/deploy_key
-          else
-            ssh-add ~/.ssh/deploy_key
-          fi
-
-      - name: Copy files and deploy
-        env:
           DEPLOY_HOST: ${{ secrets.HOST_TEST }}
           DEPLOY_USER: ${{ secrets.USER }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
@@ -197,26 +193,56 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${DEPLOY_HOST:-}" ] || [ -z "${DEPLOY_USER:-}" ]; then
+            echo "::error::DEPLOY_HOST and DEPLOY_USER must be configured in repository secrets"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          eval "$(ssh-agent -s)"
+          if [ -n "${SSH_PASSPHRASE:-}" ]; then
+            echo "$SSH_PASSPHRASE" | ssh-add ~/.ssh/deploy_key
+          else
+            ssh-add ~/.ssh/deploy_key
+          fi
+
           SSH_PORT="${SSH_PORT:-22}"
           REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
           REMOTE_DIR="/home/${DEPLOY_USER}/rit-utils"
-          SSH_OPTS="-p ${SSH_PORT} -o ConnectTimeout=60 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new"
+          SSH_OPTS="-p ${SSH_PORT} -o ConnectTimeout=60 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
           IMAGE_TAG="${IMAGE_TAG:0:12}"
 
-          ssh-keyscan -p "${SSH_PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+          echo "Deploying to ${REMOTE}:${REMOTE_DIR} with IMAGE_TAG=${IMAGE_TAG}"
 
+          ssh-keyscan -T 15 -p "${SSH_PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts 2>/dev/null \
+            || echo "Warning: ssh-keyscan could not fetch host key, continuing with accept-new"
+
+          echo "Creating remote directories..."
           ssh ${SSH_OPTS} "${REMOTE}" "mkdir -p ${REMOTE_DIR}/nginx/conf.d"
+
+          echo "Copying docker-compose.production.yml..."
           scp ${SSH_OPTS} docker-compose.production.yml "${REMOTE}:${REMOTE_DIR}/"
+
+          echo "Copying nginx config..."
           scp ${SSH_OPTS} -r nginx "${REMOTE}:${REMOTE_DIR}/"
 
+          echo "Running docker-compose on remote server..."
           ssh ${SSH_OPTS} "${REMOTE}" bash -s <<EOF
           set -euo pipefail
           cd "${REMOTE_DIR}"
           export IMAGE_TAG="${IMAGE_TAG}"
-          docker-compose -f docker-compose.production.yml pull
-          docker-compose -f docker-compose.production.yml down
-          docker-compose -f docker-compose.production.yml up -d
-          docker-compose -f docker-compose.production.yml ps
+          if command -v docker-compose >/dev/null 2>&1; then
+            DC="docker-compose"
+          else
+            DC="docker compose"
+          fi
+          \$DC -f docker-compose.production.yml pull
+          \$DC -f docker-compose.production.yml down
+          \$DC -f docker-compose.production.yml up -d
+          \$DC -f docker-compose.production.yml ps
           EOF
 
   send_message_prod:
