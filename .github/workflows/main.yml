@@ -128,6 +128,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
+            set -eu
             cd /home/${{ secrets.USER }}/rit-utils
             export IMAGE_TAG=main-$(echo '${{ github.sha }}' | cut -c1-7)
             if docker compose version >/dev/null 2>&1; then
@@ -181,6 +182,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
+            set -eu
             cd /home/${{ secrets.USER }}/rit-utils
             export IMAGE_TAG=test-$(echo '${{ github.sha }}' | cut -c1-7)
             if docker compose version >/dev/null 2>&1; then
