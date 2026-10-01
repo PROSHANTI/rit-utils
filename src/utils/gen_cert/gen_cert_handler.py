@@ -1,151 +1,163 @@
-import os
-import random
-import tempfile
 import base64
+import logging
+import random
 import subprocess
-from fastapi import Form, Request, BackgroundTasks
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from fastapi import BackgroundTasks
 from fastapi.responses import FileResponse, RedirectResponse
 from pptx import Presentation
+from pptx.presentation import Presentation as PptxPresentation
+
+logger = logging.getLogger(__name__)
 
 
-def get_random_number():
-    """Получает случайное число до 6 знаков."""
-    return random.randint(100000, 999999)
+@dataclass(frozen=True, slots=True)
+class CertificateRequest:
+    name: str | None = None
+    price: str | None = None
 
 
-def convert_pptx_to_pdf(pptx_path, pdf_path):
-    """Конвертирует PPTX файл в PDF используя LibreOffice."""
-    try:
-        libreoffice_paths = [
-            'libreoffice',
-            '/usr/bin/libreoffice',
-            '/usr/local/bin/libreoffice',
-            '/snap/bin/libreoffice',
-            '/opt/libreoffice/program/soffice',
-            '/Applications/LibreOffice.app/Contents/MacOS/soffice'
-        ]
-        libreoffice_cmd = None
+class LibreOfficeConverter:
+    def convert(self, pptx_path: str, pdf_path: str) -> None:
+        logger.info("Начата конвертация сертификата в PDF")
 
-        for path in libreoffice_paths:
+        try:
+            executable = self._find_executable()
+            output_directory = Path(pdf_path).parent
+            command = [executable, "--headless", "--convert-to", "pdf", "--outdir", f"{output_directory}", pptx_path]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+
+            if result.returncode != 0:
+                raise Exception(f"LibreOffice error: {result.stderr}")
+
+            generated_pdf = output_directory / f"{Path(pptx_path).stem}.pdf"
+
+            if not generated_pdf.exists():
+                raise Exception("PDF файл не был создан")
+
+            if generated_pdf != Path(pdf_path):
+                generated_pdf.rename(pdf_path)
+
+            logger.info("Конвертация сертификата в PDF завершена")
+
+        except subprocess.TimeoutExpired:
+            logger.exception("Превышено время ожидания конвертации сертификата")
+            raise Exception("Превышено время ожидания конвертации")
+
+        except Exception as exc:
+            logger.exception("Не удалось конвертировать сертификат в PDF")
+            raise Exception(f"Ошибка конвертации: {exc}")
+
+    @staticmethod
+    def _find_executable() -> str:
+        candidates = (
+            "libreoffice",
+            "/usr/bin/libreoffice",
+            "/usr/local/bin/libreoffice",
+            "/snap/bin/libreoffice",
+            "/opt/libreoffice/program/soffice",
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        )
+
+        for executable in candidates:
             try:
-                result = subprocess.run(
-                    [path, '--version'], capture_output=True, timeout=5
-                )
-                if result.returncode == 0:
-                    libreoffice_cmd = path
-                    break
+                version_result = subprocess.run([executable, "--version"], capture_output=True, timeout=5)
+
+                if version_result.returncode == 0:
+                    return executable
+
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
 
-        if not libreoffice_cmd:
-            raise Exception(
-                "LibreOffice не найден. Установите LibreOffice:\n"
-                "Ubuntu/Debian: sudo apt-get install libreoffice\n"
-                "CentOS/RHEL: sudo yum install libreoffice\n"
-                "macOS: brew install --cask libreoffice"
-            )
-
-        cmd = [
-            libreoffice_cmd,
-            '--headless',
-            '--convert-to', 'pdf',
-            '--outdir', os.path.dirname(pdf_path),
-            pptx_path
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-        if result.returncode != 0:
-            raise Exception(f"LibreOffice error: {result.stderr}")
-
-
-        base_name = os.path.splitext(os.path.basename(pptx_path))[0]
-        generated_pdf = os.path.join(os.path.dirname(pdf_path), f"{base_name}.pdf")
-
-        if not os.path.exists(generated_pdf):
-            raise Exception("PDF файл не был создан")
-
-        if generated_pdf != pdf_path:
-            os.rename(generated_pdf, pdf_path)
-
-    except subprocess.TimeoutExpired:
-        raise Exception("Превышено время ожидания конвертации")
-    except Exception as e:
-        raise Exception(f"Ошибка конвертации: {str(e)}")
-
-
-def gen_cert_handler(
-    request: Request,
-    name: str | None = Form(None),
-    price: str | None = Form(None)
-):
-    """Обработчик для генерации сертификатов"""
-    try:
-        template_path = os.path.join(
-            os.path.dirname(__file__),
-            'Сертификат_шаблон.pptx'
+        raise Exception(
+            "LibreOffice не найден. Установите LibreOffice:\n"
+            "Ubuntu/Debian: sudo apt-get install libreoffice\n"
+            "CentOS/RHEL: sudo yum install libreoffice\n"
+            "macOS: brew install --cask libreoffice"
         )
 
-        if not os.path.exists(template_path):
-            raise FileNotFoundError(
-                f"Файл шаблона не найден: {template_path}"
+
+class CertificateGenerator:
+    def __init__(self, *, template_path: Path | None = None, converter: LibreOfficeConverter | None = None) -> None:
+        self.template_path = template_path or Path(__file__).with_name("Сертификат_шаблон.pptx")
+        self.converter = converter or LibreOfficeConverter()
+
+    def generate(self, data: CertificateRequest) -> FileResponse | RedirectResponse:
+        logger.info("Начата обработка запроса на создание сертификата")
+        temporary_paths: list[str] = []
+
+        try:
+            if not self.template_path.exists():
+                raise FileNotFoundError(f"Файл шаблона не найден: {self.template_path}")
+
+            replacements = self._get_replacements(data)
+            presentation = Presentation(f"{self.template_path}")
+            self._replace_text(presentation, replacements)
+            pptx_path = self._create_temporary_file(".pptx", temporary_paths)
+            pdf_path = self._create_temporary_file(".pdf", temporary_paths)
+            presentation.save(pptx_path)
+            self.converter.convert(pptx_path, pdf_path)
+
+            background_tasks = BackgroundTasks()
+            background_tasks.add_task(self._cleanup, temporary_paths)
+            logger.info("Сертификат создан и подготовлен к отправке")
+            return FileResponse(
+                path=pdf_path, filename="Сертификат.pdf", media_type="application/pdf", background=background_tasks
             )
 
-        name_value = name.strip() if name else ""
-        price_value = price.strip() if price else ""
-        serial_number = get_random_number()
-        prs = Presentation(template_path)
+        except Exception as exc:
+            logger.exception("Не удалось создать сертификат")
+            self._cleanup(temporary_paths)
+            status = f"Ошибка генерации сертификата: {exc}"
+            response = RedirectResponse(url="/gen_rit_cert", status_code=303)
+            encoded_status = base64.b64encode(status.encode("utf-8")).decode("ascii")
+            response.set_cookie("gen_cert_status", encoded_status, max_age=10)
+            return response
 
-        replacements = {
-            'price': f"{price_value} ₽" if price_value and price_value.isdigit() else price_value,
-            'name': str(name_value),
-            'serial': str(serial_number),
+    def _get_replacements(self, data: CertificateRequest) -> dict[str, str]:
+        name = data.name.strip() if data.name else ""
+        price = data.price.strip() if data.price else ""
+        return {
+            "price": f"{price} ₽" if price and price.isdigit() else price,
+            "name": name,
+            "serial": f"{self._get_random_number()}",
         }
 
-        slide = prs.slides[0]
-        for shape in slide.shapes:
+    @staticmethod
+    def _get_random_number() -> int:
+        logger.debug("Генерация номера сертификата")
+        return random.randint(100000, 999999)
+
+    @staticmethod
+    def _replace_text(presentation: PptxPresentation, replacements: dict[str, str]) -> None:
+        for shape in presentation.slides[0].shapes:
             if not shape.has_text_frame:
                 continue
+
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
-                    for key, value in replacements.items():
-                        if key in run.text:
-                            run.text = run.text.replace(key, value)
+                    for placeholder, value in replacements.items():
+                        if placeholder in run.text:
+                            run.text = run.text.replace(placeholder, value)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as temp_pptx:
-            temp_pptx_path = temp_pptx.name
+    @staticmethod
+    def _create_temporary_file(suffix: str, temporary_paths: list[str]) -> str:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary_file:
+            temporary_paths.append(temporary_file.name)
+            return temporary_file.name
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_pdf:
-            temp_pdf_path = temp_pdf.name
+    @staticmethod
+    def _cleanup(temporary_paths: list[str]) -> None:
+        logger.debug("Начата очистка временных файлов сертификата")
 
-        prs.save(temp_pptx_path)
-
-        convert_pptx_to_pdf(temp_pptx_path, temp_pdf_path)
-
-        output_filename = "Сертификат.pdf"
-
-        def cleanup_temp_files():
+        for temporary_path in temporary_paths:
             try:
-                os.unlink(temp_pptx_path)
-                os.unlink(temp_pdf_path)
+                Path(temporary_path).unlink()
+
             except OSError:
-                pass
+                logger.warning("Не удалось удалить временный файл сертификата")
 
-        media_type = 'application/pdf'
-
-        background_tasks = BackgroundTasks()
-        background_tasks.add_task(cleanup_temp_files)
-
-        return FileResponse(
-            path=temp_pdf_path,
-            filename=output_filename,
-            media_type=media_type,
-            background=background_tasks
-        )
-
-    except Exception as e:
-        status = f"Ошибка генерации сертификата: {str(e)}"
-        response = RedirectResponse(url="/gen_rit_cert", status_code=303)
-        encoded_status = base64.b64encode(status.encode('utf-8')).decode('ascii')
-        response.set_cookie("gen_cert_status", encoded_status, max_age=10)
-        return response
+        logger.debug("Очистка временных файлов сертификата завершена")

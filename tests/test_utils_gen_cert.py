@@ -1,285 +1,150 @@
-"""
-Tests for gen_cert/gen_cert_handler.py module
-"""
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
+import base64
+import subprocess
+from http.cookies import SimpleCookie
+from pathlib import Path
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from fastapi.responses import FileResponse, RedirectResponse
 
-from src.utils.gen_cert.gen_cert_handler import (
-    convert_pptx_to_pdf,
-    gen_cert_handler,
-    get_random_number,
-)
+from src.utils.gen_cert.gen_cert_handler import CertificateGenerator, CertificateRequest, LibreOfficeConverter
 
 
-class TestRandomNumber:
-    """Tests for random number generation"""
-
-    def test_get_random_number_range(self):
-        """Test random number generation in correct range"""
-        number = get_random_number()
-
-        assert isinstance(number, int)
-        assert 100000 <= number <= 999999
-
-    def test_get_random_number_uniqueness(self):
-        """Test generated numbers uniqueness (probabilistic)"""
-        numbers = [get_random_number() for _ in range(10)]
-
-        assert len(set(numbers)) > 1
-
-
-class TestPptxToPdfConversion:
-    """Tests for PPTX to PDF conversion"""
-
-    @patch('src.utils.gen_cert.gen_cert_handler.subprocess.run')
-    def test_convert_pptx_to_pdf_success(self, mock_run, temp_file):
-        """Test successful PPTX to PDF conversion"""
-        pptx_path = temp_file + ".pptx"
-        pdf_path = temp_file + ".pdf"
-
-        with open(pptx_path, 'w') as f:
-            f.write("fake pptx")
-        with open(pdf_path, 'w') as f:
-            f.write("fake pdf")
-
+class TestLibreOfficeConverter:
+    @patch("src.utils.gen_cert.gen_cert_handler.subprocess.run")
+    def test_convert_runs_original_commands_and_moves_generated_pdf(self, mock_run, tmp_path):
+        pptx_path = tmp_path / "source.pptx"
+        generated_pdf = tmp_path / "source.pdf"
+        pdf_path = tmp_path / "target.pdf"
+        generated_pdf.write_bytes(b"PDF data")
         mock_run.return_value.returncode = 0
-        mock_run.return_value.stderr = ""
 
-        try:
-            convert_pptx_to_pdf(pptx_path, pdf_path)
-        except Exception as e:
-            pytest.fail(f"Conversion failed: {e}")
-        finally:
-            for path in [pptx_path, pdf_path]:
-                if os.path.exists(path):
-                    os.unlink(path)
+        LibreOfficeConverter().convert(f"{pptx_path}", f"{pdf_path}")
 
-    @patch('src.utils.gen_cert.gen_cert_handler.subprocess.run')
-    def test_convert_pptx_to_pdf_libreoffice_not_found(self, mock_run):
-        """Test LibreOffice not found error handling"""
-        mock_run.side_effect = FileNotFoundError("LibreOffice not found")
+        assert pdf_path.read_bytes() == b"PDF data"
+        assert not generated_pdf.exists()
+        assert mock_run.call_args_list == [
+            call(["libreoffice", "--version"], capture_output=True, timeout=5),
+            call(
+                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", f"{tmp_path}", f"{pptx_path}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ),
+        ]
 
+    @patch("src.utils.gen_cert.gen_cert_handler.subprocess.run")
+    def test_convert_tries_next_executable_when_first_is_unavailable(self, mock_run, tmp_path):
+        pptx_path = tmp_path / "source.pptx"
+        pdf_path = tmp_path / "source.pdf"
+        pdf_path.write_bytes(b"PDF data")
+        mock_run.side_effect = [FileNotFoundError("not found"), MagicMock(returncode=0), MagicMock(returncode=0)]
+
+        LibreOfficeConverter().convert(f"{pptx_path}", f"{pdf_path}")
+
+        assert mock_run.call_args.args[0][0] == "/usr/bin/libreoffice"
+        assert pdf_path.read_bytes() == b"PDF data"
+
+    @patch("src.utils.gen_cert.gen_cert_handler.subprocess.run", side_effect=FileNotFoundError("not found"))
+    def test_convert_reports_unavailable_libreoffice(self, mock_run):
         with pytest.raises(Exception, match="LibreOffice не найден"):
-            convert_pptx_to_pdf("fake.pptx", "fake.pdf")
+            LibreOfficeConverter().convert("fake.pptx", "fake.pdf")
 
-    @patch('src.utils.gen_cert.gen_cert_handler.subprocess.run')
-    def test_convert_pptx_to_pdf_libreoffice_error(self, mock_run, temp_file):
-        """Test LibreOffice error handling"""
-        pptx_path = temp_file + ".pptx"
-        pdf_path = temp_file + ".pdf"
+        assert mock_run.call_count == 6
 
-        with open(pptx_path, 'w') as f:
-            f.write("fake pptx")
+    @pytest.mark.parametrize(
+        ("conversion_result", "error_message"),
+        [
+            pytest.param(MagicMock(returncode=1, stderr="conversion error"), "LibreOffice error", id="command-failed"),
+            pytest.param(subprocess.TimeoutExpired("libreoffice", 30), "Превышено время ожидания", id="timeout"),
+            pytest.param(TimeoutError("Timeout"), "Ошибка конвертации", id="unexpected-error"),
+        ],
+    )
+    @patch("src.utils.gen_cert.gen_cert_handler.subprocess.run")
+    def test_convert_reports_command_errors(self, mock_run, conversion_result, error_message):
+        mock_run.side_effect = [MagicMock(returncode=0), conversion_result]
 
-        mock_run.side_effect = [
-            MagicMock(returncode=0),
-            MagicMock(returncode=1, stderr="LibreOffice conversion error")
-        ]
+        with pytest.raises(Exception, match=error_message):
+            LibreOfficeConverter().convert("fake.pptx", "fake.pdf")
 
-        with pytest.raises(Exception, match="LibreOffice error"):
-            convert_pptx_to_pdf(pptx_path, pdf_path)
+    @patch("src.utils.gen_cert.gen_cert_handler.subprocess.run")
+    def test_convert_reports_missing_generated_pdf(self, mock_run, tmp_path):
+        mock_run.return_value.returncode = 0
 
-        if os.path.exists(pptx_path):
-            os.unlink(pptx_path)
-
-    @patch('src.utils.gen_cert.gen_cert_handler.subprocess.run')
-    def test_convert_pptx_to_pdf_timeout(self, mock_run):
-        """Test conversion timeout handling"""
-        mock_run.side_effect = [
-            MagicMock(returncode=0),
-            TimeoutError("Timeout")
-        ]
-
-        with pytest.raises(Exception, match="Ошибка конвертации"):
-            convert_pptx_to_pdf("fake.pptx", "fake.pdf")
+        with pytest.raises(Exception, match="PDF файл не был создан"):
+            LibreOfficeConverter().convert(f"{tmp_path / 'source.pptx'}", f"{tmp_path / 'target.pdf'}")
 
 
-class TestGenCertHandler:
-    """Tests for certificate generation handler"""
+class TestCertificateGenerator:
+    @pytest.mark.parametrize("number", [100000, 999999])
+    @patch("src.utils.gen_cert.gen_cert_handler.random.randint")
+    def test_serial_number_uses_six_digit_range(self, mock_randint, number):
+        mock_randint.return_value = number
 
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_success(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test successful certificate generation"""
-        mock_exists.return_value = True
+        result = CertificateGenerator._get_random_number()
+
+        assert result == number
+        mock_randint.assert_called_once_with(100000, 999999)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "price", "expected_name", "expected_price"),
+        [
+            pytest.param("  recipient  ", "  5000  ", "recipient", "5000 ₽", id="numeric-price"),
+            pytest.param("recipient", "бесплатно", "recipient", "бесплатно", id="text-price"),
+            pytest.param("", "", "", "", id="empty-values"),
+            pytest.param(None, None, "", "", id="missing-values"),
+        ],
+    )
+    @patch.object(Path, "exists", return_value=True)
+    @patch("src.utils.gen_cert.gen_cert_handler.Presentation")
+    @patch.object(CertificateGenerator, "_get_random_number", return_value=123456)
+    async def test_generate_replaces_fields_and_cleans_download(
+        self, mock_number, mock_presentation, mock_exists, mock_pptx, name, price, expected_name, expected_price
+    ):
         mock_presentation.return_value = mock_pptx
+        paragraph = mock_pptx.slides[0].shapes[0].text_frame.paragraphs[0]
+        runs = [MagicMock(text="name"), MagicMock(text="price"), MagicMock(text="serial")]
+        paragraph.runs = runs
+        converter = MagicMock(spec=LibreOfficeConverter)
 
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="5000"
-        )
+        response = CertificateGenerator(converter=converter).generate(CertificateRequest(name=name, price=price))
 
-        assert isinstance(result, FileResponse)
-        assert result.filename == "Сертификат.pdf"
-        mock_convert.assert_called_once()
+        assert isinstance(response, FileResponse)
+        assert response.filename == "Сертификат.pdf"
+        assert response.media_type == "application/pdf"
+        assert [run.text for run in runs] == [expected_name, expected_price, "123456"]
+        converter.convert.assert_called_once()
+        pptx_path, pdf_path = converter.convert.call_args.args
+        assert response.path == pdf_path
+        assert response.background is not None
+        await response.background()
+        assert not Path(pptx_path).is_file()
+        assert not Path(pdf_path).is_file()
 
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    def test_gen_cert_handler_template_not_found(self, mock_exists, mock_request):
-        """Test missing template handling"""
-        mock_exists.return_value = False
+    @patch.object(Path, "exists", return_value=False)
+    def test_generate_missing_template_returns_status_cookie(self, mock_exists):
+        response = CertificateGenerator().generate(CertificateRequest())
 
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="5000"
-        )
+        assert isinstance(response, RedirectResponse)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/gen_rit_cert"
+        cookie = SimpleCookie(response.headers["set-cookie"])["gen_cert_status"]
+        assert base64.b64decode(cookie.value).decode("utf-8").startswith("Ошибка генерации сертификата: Файл шаблона не найден:")
+        assert cookie["max-age"] == "10"
 
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_empty_values(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test certificate generation with empty values"""
-        mock_exists.return_value = True
+    @patch.object(Path, "exists", return_value=True)
+    @patch("src.utils.gen_cert.gen_cert_handler.Presentation")
+    def test_generate_conversion_failure_cleans_both_temporary_files(self, mock_presentation, mock_exists, mock_pptx):
         mock_presentation.return_value = mock_pptx
+        converter = MagicMock(spec=LibreOfficeConverter)
+        converter.convert.side_effect = ValueError("Conversion error")
 
-        result = gen_cert_handler(
-            request=mock_request,
-            name="",
-            price=""
-        )
+        response = CertificateGenerator(converter=converter).generate(CertificateRequest(name="recipient", price="5000"))
 
-        assert isinstance(result, FileResponse)
-        mock_convert.assert_called_once()
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_none_values(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test certificate generation with None values"""
-        mock_exists.return_value = True
-        mock_presentation.return_value = mock_pptx
-
-        result = gen_cert_handler(
-            request=mock_request,
-            name=None,
-            price=None
-        )
-
-        assert isinstance(result, FileResponse)
-        mock_convert.assert_called_once()
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    def test_gen_cert_handler_presentation_error(self, mock_exists, mock_presentation, mock_request):
-        """Test presentation error handling"""
-        mock_exists.return_value = True
-        mock_presentation.side_effect = Exception("Presentation error")
-
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="5000"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/gen_rit_cert"
-        assert result.status_code == 303
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_numeric_price_adds_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test that numeric price gets ₽ symbol added"""
-        mock_exists.return_value = True
-        
-        # Настраиваем мок для проверки замены текста
-        mock_run = MagicMock()
-        mock_run.text = "price"  # Начальный текст содержит ключ для замены
-        mock_paragraph = MagicMock()
-        mock_paragraph.runs = [mock_run]
-        mock_text_frame = MagicMock()
-        mock_text_frame.paragraphs = [mock_paragraph]
-        mock_shape = MagicMock()
-        mock_shape.has_text_frame = True
-        mock_shape.text_frame = mock_text_frame
-        mock_slide = MagicMock()
-        mock_slide.shapes = [mock_shape]
-        mock_presentation_instance = MagicMock()
-        mock_presentation_instance.slides = [mock_slide]
-        mock_presentation.return_value = mock_presentation_instance
-
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="5000"
-        )
-
-        assert isinstance(result, FileResponse)
-        # Проверяем, что текст был заменен на "5000 ₽"
-        assert mock_run.text == "5000 ₽"
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_text_price_no_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test that text price doesn't get ₽ symbol added"""
-        mock_exists.return_value = True
-        
-        # Настраиваем мок для проверки замены текста
-        mock_run = MagicMock()
-        mock_run.text = "price"  # Начальный текст содержит ключ для замены
-        mock_paragraph = MagicMock()
-        mock_paragraph.runs = [mock_run]
-        mock_text_frame = MagicMock()
-        mock_text_frame.paragraphs = [mock_paragraph]
-        mock_shape = MagicMock()
-        mock_shape.has_text_frame = True
-        mock_shape.text_frame = mock_text_frame
-        mock_slide = MagicMock()
-        mock_slide.shapes = [mock_shape]
-        mock_presentation_instance = MagicMock()
-        mock_presentation_instance.slides = [mock_slide]
-        mock_presentation.return_value = mock_presentation_instance
-
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price="бесплатно"
-        )
-
-        assert isinstance(result, FileResponse)
-        # Проверяем, что текст был заменен на "бесплатно" без ₽
-        assert mock_run.text == "бесплатно"
-
-    @patch('src.utils.gen_cert.gen_cert_handler.os.path.exists')
-    @patch('src.utils.gen_cert.gen_cert_handler.Presentation')
-    @patch('src.utils.gen_cert.gen_cert_handler.convert_pptx_to_pdf')
-    def test_gen_cert_handler_empty_price_no_ruble_symbol(self, mock_convert, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test that empty price doesn't get ₽ symbol added"""
-        mock_exists.return_value = True
-        
-        # Настраиваем мок для проверки замены текста
-        mock_run = MagicMock()
-        mock_run.text = "price"  # Начальный текст содержит ключ для замены
-        mock_paragraph = MagicMock()
-        mock_paragraph.runs = [mock_run]
-        mock_text_frame = MagicMock()
-        mock_text_frame.paragraphs = [mock_paragraph]
-        mock_shape = MagicMock()
-        mock_shape.has_text_frame = True
-        mock_shape.text_frame = mock_text_frame
-        mock_slide = MagicMock()
-        mock_slide.shapes = [mock_shape]
-        mock_presentation_instance = MagicMock()
-        mock_presentation_instance.slides = [mock_slide]
-        mock_presentation.return_value = mock_presentation_instance
-
-        result = gen_cert_handler(
-            request=mock_request,
-            name="Иван Иванов",
-            price=""
-        )
-
-        assert isinstance(result, FileResponse)
-        # Проверяем, что текст был заменен на пустую строку без ₽
-        assert mock_run.text == ""
+        assert isinstance(response, RedirectResponse)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/gen_rit_cert"
+        cookie = SimpleCookie(response.headers["set-cookie"])["gen_cert_status"]
+        assert base64.b64decode(cookie.value).decode("utf-8") == "Ошибка генерации сертификата: Conversion error"
+        assert all(not Path(temporary_path).is_file() for temporary_path in converter.convert.call_args.args)

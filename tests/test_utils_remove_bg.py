@@ -1,389 +1,397 @@
-"""
-Tests for remove_bg module
-"""
-import os
+"""Проверки обработки изображений и HTTP-ответов удаления фона."""
+
+import base64
+import logging
+from http.cookies import SimpleCookie
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-try:
-    import numpy as np
-except ImportError:
-    np = None
+import cv2
+import numpy as np
 import pytest
+from fastapi import BackgroundTasks
 from fastapi.responses import FileResponse, RedirectResponse
+from numpy.typing import NDArray
 
-from src.utils.remove_bg.remove_bg_document import (
-    parse_rgb_color,
-    remove_background,
-)
-from src.utils.remove_bg.remove_bg_handler import remove_bg_handler
+from src.utils.remove_bg import BackgroundRemovalOptions, BackgroundRemover, RemoveBackgroundHandler
 
 
-class TestParseRgbColor:
-    """Tests for RGB color parsing"""
-
-    def test_parse_rgb_color_valid(self):
-        """Test parsing valid RGB color string"""
-        result = parse_rgb_color("255,0,0")
-
-        assert result == (0, 0, 255)
-        assert isinstance(result, tuple)
-        assert len(result) == 3
-
-    def test_parse_rgb_color_with_spaces(self):
-        """Test parsing RGB color with spaces"""
-        result = parse_rgb_color(" 255 , 0 , 0 ")
-
-        assert result == (0, 0, 255)
-
-    def test_parse_rgb_color_black(self):
-        """Test parsing black color"""
-        result = parse_rgb_color("0,0,0")
-
-        assert result == (0, 0, 0)
-
-    def test_parse_rgb_color_white(self):
-        """Test parsing white color"""
-        result = parse_rgb_color("255,255,255")
-
-        assert result == (255, 255, 255)
-
-    def test_parse_rgb_color_invalid_format(self):
-        """Test parsing invalid format"""
-        with pytest.raises(ValueError, match="Color must be in format"):
-            parse_rgb_color("255,0")
-
-    def test_parse_rgb_color_invalid_format_too_many(self):
-        """Test parsing invalid format with too many values"""
-        with pytest.raises(ValueError, match="Color must be in format"):
-            parse_rgb_color("255,0,0,0")
-
-    def test_parse_rgb_color_out_of_range_high(self):
-        """Test parsing RGB value out of range (too high)"""
-        with pytest.raises(ValueError, match="RGB values must be between"):
-            parse_rgb_color("256,0,0")
-
-    def test_parse_rgb_color_out_of_range_negative(self):
-        """Test parsing RGB value out of range (negative)"""
-        with pytest.raises(ValueError, match="RGB values must be between"):
-            parse_rgb_color("-1,0,0")
-
-    def test_parse_rgb_color_invalid_characters(self):
-        """Test parsing RGB with invalid characters"""
-        with pytest.raises(ValueError):
-            parse_rgb_color("abc,0,0")
+def write_document_image(path: Path, *, background: int = 255, foreground: int = 30) -> NDArray[np.uint8]:
+    image = np.full((8, 8, 3), background, dtype=np.uint8)
+    image[2:6, 2:6] = foreground
+    assert cv2.imwrite(f"{path}", image)
+    return image
 
 
-class TestRemoveBackground:
-    """Tests for background removal"""
+class TestBackgroundRemover:
+    @pytest.mark.parametrize(
+        ("color", "expected_bgr"),
+        [
+            pytest.param("255,0,0", (0, 0, 255), id="red"),
+            pytest.param(" 10 , 20 , 30 ", (30, 20, 10), id="spaces"),
+            pytest.param("0,0,0", (0, 0, 0), id="black"),
+            pytest.param("255,255,255", (255, 255, 255), id="white"),
+        ],
+    )
+    def test_parse_color_returns_bgr(self, color: str, expected_bgr: tuple[int, int, int]) -> None:
+        result = BackgroundRemover.parse_color(color)
 
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imwrite')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.cvtColor')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.threshold')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imread')
-    @patch('src.utils.remove_bg.remove_bg_document.Path.exists')
-    def test_remove_background_success(
+        assert result == expected_bgr
+
+    @pytest.mark.parametrize(
+        ("color", "expected_error"),
+        [
+            pytest.param("255,0", "Color must be in format", id="missing-channel"),
+            pytest.param("255,0,0,0", "Color must be in format", id="extra-channel"),
+            pytest.param("256,0,0", "RGB values must be between", id="above-range"),
+            pytest.param("-1,0,0", "RGB values must be between", id="below-range"),
+            pytest.param("abc,0,0", "Invalid color format", id="invalid-number"),
+        ],
+    )
+    def test_parse_color_rejects_invalid_input(self, color: str, expected_error: str) -> None:
+        with pytest.raises(ValueError, match=expected_error):
+            BackgroundRemover.parse_color(color)
+
+    @pytest.mark.parametrize(
+        ("background", "foreground", "invert", "background_alpha", "foreground_alpha"),
+        [
+            pytest.param(255, 30, False, 0, 255, id="light-background-auto-inversion"),
+            pytest.param(0, 255, False, 0, 255, id="dark-background"),
+            pytest.param(0, 255, True, 255, 0, id="explicit-inversion"),
+        ],
+    )
+    def test_remove_preserves_original_color_and_selects_alpha_mask(
         self,
-        mock_exists,
-        mock_imread,
-        mock_threshold,
-        mock_cvtcolor,
-        mock_imwrite,
-        temp_file
-    ):
-        """Test successful background removal"""
-        mock_exists.return_value = True
-        if np is not None:
-            mock_img = np.zeros((100, 100, 3), dtype=np.uint8)
-            mock_imread.return_value = mock_img
-            mock_threshold.return_value = (127, np.zeros((100, 100), dtype=np.uint8))
-            mock_cvtcolor.return_value = np.zeros((100, 100, 4), dtype=np.uint8)
-        else:
-            mock_img = MagicMock()
-            mock_imread.return_value = mock_img
-            mock_threshold.return_value = (127, MagicMock())
-            mock_cvtcolor.return_value = MagicMock()
+        tmp_path: Path,
+        background: int,
+        foreground: int,
+        invert: bool,
+        background_alpha: int,
+        foreground_alpha: int,
+    ) -> None:
+        input_path = tmp_path / "source.png"
+        output_path = tmp_path / "result.png"
+        image = write_document_image(input_path, background=background, foreground=foreground)
+        remover = BackgroundRemover(BackgroundRemovalOptions(invert=invert))
+        expected_alpha = np.full((8, 8), background_alpha, dtype=np.uint8)
+        expected_alpha[2:6, 2:6] = foreground_alpha
 
-        input_path = temp_file + ".png"
-        output_path = temp_file + "_output.png"
+        remover.remove(f"{input_path}", f"{output_path}")
 
-        with open(input_path, 'wb') as f:
-            f.write(b"fake image")
+        result = cv2.imread(f"{output_path}", cv2.IMREAD_UNCHANGED)
+        assert result is not None
+        assert result.shape == (8, 8, 4)
+        np.testing.assert_array_equal(result[:, :, :3], image)
+        np.testing.assert_array_equal(result[:, :, 3], expected_alpha)
 
-        try:
-            remove_background(input_path, output_path, invert=False, text_color=None)
-            mock_imread.assert_called_once_with(input_path)
-            mock_imwrite.assert_called_once()
-        finally:
-            for path in [input_path]:
-                if os.path.exists(path):
-                    os.unlink(path)
+    def test_remove_applies_configured_bgr_color(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "source.png"
+        output_path = tmp_path / "result.png"
+        write_document_image(input_path)
+        remover = BackgroundRemover(BackgroundRemovalOptions(text_color=(10, 20, 30)))
 
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imread')
-    @patch('src.utils.remove_bg.remove_bg_document.Path.exists')
-    def test_remove_background_file_not_exists(self, mock_exists, mock_imread, temp_file):
-        """Test background removal with non-existent file"""
-        mock_exists.return_value = False
+        remover.remove(f"{input_path}", f"{output_path}")
 
-        input_path = temp_file + ".png"
-        output_path = temp_file + "_output.png"
+        result = cv2.imread(f"{output_path}", cv2.IMREAD_UNCHANGED)
+        assert result is not None
+        np.testing.assert_array_equal(result[3, 3], [10, 20, 30, 255])
+        np.testing.assert_array_equal(result[0, 0], [255, 255, 255, 0])
 
-        with pytest.raises(SystemExit):
-            remove_background(input_path, output_path)
+    def test_remover_reuses_options_without_changing_automatic_inversion(self, tmp_path: Path) -> None:
+        light_input = tmp_path / "light.png"
+        dark_input = tmp_path / "dark.png"
+        light_output = tmp_path / "light-result.png"
+        dark_output = tmp_path / "dark-result.png"
+        write_document_image(light_input)
+        write_document_image(dark_input, background=0, foreground=255)
+        options = BackgroundRemovalOptions()
+        remover = BackgroundRemover(options)
 
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imread')
-    @patch('src.utils.remove_bg.remove_bg_document.Path.exists')
-    def test_remove_background_invalid_image(self, mock_exists, mock_imread, temp_file):
-        """Test background removal with invalid image"""
-        mock_exists.return_value = True
-        mock_imread.return_value = None
+        remover.remove(f"{light_input}", f"{light_output}")
+        remover.remove(f"{dark_input}", f"{dark_output}")
 
-        input_path = temp_file + ".png"
-        output_path = temp_file + "_output.png"
+        assert remover.options is options
+        assert options.invert is False
+        light_result = cv2.imread(f"{light_output}", cv2.IMREAD_UNCHANGED)
+        dark_result = cv2.imread(f"{dark_output}", cv2.IMREAD_UNCHANGED)
+        assert light_result is not None
+        assert dark_result is not None
+        assert light_result[0, 0, 3] == 0
+        assert dark_result[0, 0, 3] == 0
+        assert light_result[3, 3, 3] == 255
+        assert dark_result[3, 3, 3] == 255
 
-        with open(input_path, 'wb') as f:
-            f.write(b"invalid image")
+    def test_remove_missing_image_raises_file_not_found(self, tmp_path: Path) -> None:
+        remover = BackgroundRemover()
 
-        try:
-            with pytest.raises(SystemExit):
-                remove_background(input_path, output_path)
-        finally:
-            if os.path.exists(input_path):
-                os.unlink(input_path)
+        with pytest.raises(FileNotFoundError, match="Входное изображение отсутствует"):
+            remover.remove(f"{tmp_path / 'missing.png'}", f"{tmp_path / 'result.png'}")
 
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imwrite')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.cvtColor')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.threshold')
-    @patch('src.utils.remove_bg.remove_bg_document.cv2.imread')
-    @patch('src.utils.remove_bg.remove_bg_document.Path.exists')
-    def test_remove_background_with_color(
+    def test_remove_invalid_image_raises_value_error(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "invalid.png"
+        input_path.write_bytes(b"invalid image")
+        remover = BackgroundRemover()
+
+        with pytest.raises(ValueError, match="Изображение не удалось прочитать"):
+            remover.remove(f"{input_path}", f"{tmp_path / 'result.png'}")
+
+    def test_remove_write_failure_raises_and_logs_error(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        input_path = tmp_path / "source.png"
+        output_path = tmp_path / "result.png"
+        write_document_image(input_path)
+        remover = BackgroundRemover()
+
+        with patch("src.utils.remove_bg.remove_bg_document.cv2.imwrite", return_value=False):
+            with pytest.raises(OSError, match="Не удалось сохранить изображение после удаления фона"):
+                remover.remove(f"{input_path}", f"{output_path}")
+
+        assert not output_path.exists()
+        assert (
+            "src.utils.remove_bg.remove_bg_document",
+            logging.ERROR,
+            "Не удалось удалить фон изображения",
+        ) in caplog.record_tuples
+
+    def test_remove_processing_failure_logs_traceback_and_reraises_error(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        input_path = tmp_path / "source.png"
+        write_document_image(input_path)
+        remover = BackgroundRemover()
+
+        with patch("src.utils.remove_bg.remove_bg_document.cv2.cvtColor", side_effect=ValueError("Processing error")):
+            with pytest.raises(ValueError, match="Processing error"):
+                remover.remove(f"{input_path}", f"{tmp_path / 'result.png'}")
+
+        error_records = [record for record in caplog.records if record.levelno == logging.ERROR]
+        assert len(error_records) == 1
+        assert error_records[0].getMessage() == "Не удалось удалить фон изображения"
+        assert error_records[0].exc_info is not None
+
+
+class TestRemoveBackgroundHandler:
+    @pytest.mark.parametrize(
+        "extension",
+        [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".PNG"],
+    )
+    @pytest.mark.asyncio
+    async def test_handler_returns_png_and_removes_temporary_files_after_response(
         self,
-        mock_exists,
-        mock_imread,
-        mock_threshold,
-        mock_cvtcolor,
-        mock_imwrite,
-        temp_file
-    ):
-        """Test background removal with custom text color"""
-        mock_exists.return_value = True
-        if np is not None:
-            mock_img = np.zeros((100, 100, 3), dtype=np.uint8)
-            mock_imread.return_value = mock_img
-            mock_threshold.return_value = (127, np.zeros((100, 100), dtype=np.uint8))
-            mock_result = np.zeros((100, 100, 4), dtype=np.uint8)
-            mock_cvtcolor.return_value = mock_result
-        else:
-            mock_img = MagicMock()
-            mock_imread.return_value = mock_img
-            mock_threshold.return_value = (127, MagicMock())
-            mock_result = MagicMock()
-            mock_cvtcolor.return_value = mock_result
+        extension: str,
+        tmp_path: Path,
+        mock_file_upload: MagicMock,
+    ) -> None:
+        input_path = tmp_path / "source.png"
+        write_document_image(input_path)
+        mock_file_upload.filename = f"document{extension}"
+        mock_file_upload.file.read.return_value = input_path.read_bytes()
+        background_tasks = BackgroundTasks()
+        handler = RemoveBackgroundHandler()
 
-        input_path = temp_file + ".png"
-        output_path = temp_file + "_output.png"
-
-        with open(input_path, 'wb') as f:
-            f.write(b"fake image")
-
-        try:
-            remove_background(
-                input_path,
-                output_path,
-                invert=False,
-                text_color=(255, 0, 0)
-            )
-            mock_imread.assert_called_once()
-            mock_imwrite.assert_called_once()
-        finally:
-            if os.path.exists(input_path):
-                os.unlink(input_path)
-
-
-class TestRemoveBgHandler:
-    """Tests for remove background handler"""
-
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_success(
-        self,
-        mock_remove_bg,
-        mock_request,
-        mock_file_upload,
-        temp_file
-    ):
-        """Test successful background removal"""
-        mock_file_upload.filename = "test.png"
-        mock_file_upload.file.read.return_value = b"fake image content"
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file_upload,
-            color="255,0,0"
-        )
+        result = handler.handle(background_tasks=background_tasks, file=mock_file_upload, color="255,0,0")
 
         assert isinstance(result, FileResponse)
-        assert result.filename == "test_no_bg.png"
+        assert result.filename == "document_no_bg.png"
         assert result.media_type == "image/png"
-        mock_remove_bg.assert_called_once()
+        assert result.background is background_tasks
+        assert len(background_tasks.tasks) == 1
+        temporary_paths = [Path(f"{path}") for path in background_tasks.tasks[0].args]
+        assert all(path.exists() for path in temporary_paths)
 
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_default_color(
+        try:
+            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
+            assert processed_image is not None
+            np.testing.assert_array_equal(processed_image[3, 3], [0, 0, 255, 255])
+            assert processed_image[0, 0, 3] == 0
+
+        finally:
+            await background_tasks()
+
+        assert all(not path.exists() for path in temporary_paths)
+
+    @pytest.mark.parametrize(
+        ("color", "expected_bgr"),
+        [
+            pytest.param(None, (0, 0, 0), id="default-black"),
+            pytest.param("", (0, 0, 0), id="empty-color-black"),
+            pytest.param("10,20,30", (30, 20, 10), id="custom-color"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_handler_uses_requested_color(
         self,
-        mock_remove_bg,
-        mock_request,
-        mock_file_upload
-    ):
-        """Test background removal with default color (black)"""
-        mock_file_upload.filename = "test.jpg"
-        mock_file_upload.file.read.return_value = b"fake image content"
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file_upload,
-            color=None
-        )
-
-        assert isinstance(result, FileResponse)
-        mock_remove_bg.assert_called_once()
-        call_args = mock_remove_bg.call_args
-        assert call_args[1]['text_color'] == (0, 0, 0)
-
-    def test_remove_bg_handler_no_filename(self, mock_request):
-        """Test handler with file without filename"""
-        mock_file = MagicMock()
-        mock_file.filename = None
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file,
-            color=None
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/remove_bg"
-        assert result.status_code == 303
-
-    def test_remove_bg_handler_invalid_extension(self, mock_request):
-        """Test handler with unsupported file extension"""
-        mock_file = MagicMock()
-        mock_file.filename = "test.pdf"
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file,
-            color=None
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/remove_bg"
-        assert result.status_code == 303
-
-    def test_remove_bg_handler_invalid_color_format(self, mock_request, mock_file_upload):
-        """Test handler with invalid color format"""
-        mock_file_upload.filename = "test.png"
-        mock_file_upload.file.read.return_value = b"fake image content"
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file_upload,
-            color="invalid"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/remove_bg"
-        assert result.status_code == 303
-
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_allowed_extensions(
-        self,
-        mock_remove_bg,
-        mock_request,
-        temp_file
-    ):
-        """Test handler with all allowed file extensions"""
-        allowed_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']
-
-        for ext in allowed_extensions:
-            mock_file = MagicMock()
-            mock_file.filename = f"test{ext}"
-            mock_file.file.read.return_value = b"fake image content"
-
-            result = remove_bg_handler(
-                request=mock_request,
-                background_tasks=MagicMock(),
-                file=mock_file,
-                color=None
-            )
-
-            assert isinstance(result, FileResponse)
-            mock_remove_bg.reset_mock()
-
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_output_filename(
-        self,
-        mock_remove_bg,
-        mock_request,
-        mock_file_upload
-    ):
-        """Test handler generates correct output filename"""
+        color: str | None,
+        expected_bgr: tuple[int, int, int],
+        tmp_path: Path,
+        mock_file_upload: MagicMock,
+    ) -> None:
+        input_path = tmp_path / "source.png"
+        write_document_image(input_path)
         mock_file_upload.filename = "my_image.jpg"
-        mock_file_upload.file.read.return_value = b"fake image content"
+        mock_file_upload.file.read.return_value = input_path.read_bytes()
+        background_tasks = BackgroundTasks()
 
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file_upload,
-            color=None
-        )
+        result = RemoveBackgroundHandler().handle(background_tasks=background_tasks, file=mock_file_upload, color=color)
 
         assert isinstance(result, FileResponse)
         assert result.filename == "my_image_no_bg.png"
 
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_background_tasks(
+        try:
+            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
+            assert processed_image is not None
+            np.testing.assert_array_equal(processed_image[3, 3, :3], expected_bgr)
+
+        finally:
+            await background_tasks()
+
+    @pytest.mark.parametrize(
+        ("filename", "color", "expected_error"),
+        [
+            pytest.param(None, None, "Файл не был загружен", id="missing-filename"),
+            pytest.param("test.pdf", None, "Неподдерживаемый формат файла.", id="unsupported-extension"),
+            pytest.param("test.png", "invalid", "Неверный формат цвета:", id="invalid-color"),
+        ],
+    )
+    def test_handler_validation_redirects_with_status_cookie(
         self,
-        mock_remove_bg,
-        mock_request,
-        mock_file_upload
-    ):
-        """Test handler adds cleanup task to background tasks"""
-        mock_file_upload.filename = "test.png"
-        mock_file_upload.file.read.return_value = b"fake image content"
-        mock_background_tasks = MagicMock()
+        filename: str | None,
+        color: str | None,
+        expected_error: str,
+        mock_file_upload: MagicMock,
+    ) -> None:
+        mock_file_upload.filename = filename
+        background_tasks = BackgroundTasks()
 
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=mock_background_tasks,
-            file=mock_file_upload,
-            color=None
-        )
-
-        assert isinstance(result, FileResponse)
-        mock_background_tasks.add_task.assert_called_once()
-
-    @patch('src.utils.remove_bg.remove_bg_handler.remove_background')
-    def test_remove_bg_handler_exception_handling(
-        self,
-        mock_remove_bg,
-        mock_request,
-        mock_file_upload
-    ):
-        """Test handler exception handling"""
-        mock_file_upload.filename = "test.png"
-        mock_file_upload.file.read.return_value = b"fake image content"
-        mock_remove_bg.side_effect = Exception("Processing error")
-
-        result = remove_bg_handler(
-            request=mock_request,
-            background_tasks=MagicMock(),
-            file=mock_file_upload,
-            color=None
-        )
+        result = RemoveBackgroundHandler().handle(background_tasks=background_tasks, file=mock_file_upload, color=color)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/remove_bg"
         assert result.status_code == 303
+        assert not background_tasks.tasks
+        mock_file_upload.file.read.assert_not_called()
+        status = self._get_status(result)
+        assert status.startswith(f"Ошибка обработки изображения: {expected_error}")
+
+    def test_handler_processing_exception_redirects_and_logs_traceback(
+        self, mock_file_upload: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_file_upload.filename = "test.png"
+        background_tasks = BackgroundTasks()
+
+        with patch.object(BackgroundRemover, "remove", side_effect=RuntimeError("Processing error")) as mock_remove:
+            result = RemoveBackgroundHandler().handle(background_tasks=background_tasks, file=mock_file_upload, color=None)
+
+        try:
+            assert isinstance(result, RedirectResponse)
+            assert result.headers["location"] == "/remove_bg"
+            assert result.status_code == 303
+            assert not background_tasks.tasks
+            status = self._get_status(result)
+            assert status == "Ошибка обработки изображения: Processing error"
+            error_records = [record for record in caplog.records if record.levelno == logging.ERROR]
+            assert len(error_records) == 1
+            assert error_records[0].getMessage() == "Не удалось обработать изображение"
+            assert error_records[0].exc_info is not None
+
+        finally:
+            Path(mock_remove.call_args.kwargs["input_path"]).unlink(missing_ok=True)
+            Path(mock_remove.call_args.kwargs["output_path"]).unlink(missing_ok=True)
+
+    def test_handler_corrupt_image_redirects_and_removes_temporary_files(self, mock_file_upload: MagicMock) -> None:
+        mock_file_upload.filename = "invalid.png"
+        mock_file_upload.file.read.return_value = b"invalid image"
+        handler = RemoveBackgroundHandler()
+        background_tasks = BackgroundTasks()
+
+        with patch.object(
+            RemoveBackgroundHandler, "_cleanup_temp_files", wraps=RemoveBackgroundHandler._cleanup_temp_files
+        ) as mock_cleanup:
+            result = handler.handle(background_tasks=background_tasks, file=mock_file_upload)
+
+        assert isinstance(result, RedirectResponse)
+        assert result.status_code == 303
+        assert result.headers["location"] == "/remove_bg"
+        assert self._get_status(result) == "Ошибка обработки изображения: Изображение не удалось прочитать"
+        assert not background_tasks.tasks
+        self._assert_temporary_files_removed(mock_cleanup, expected_count=2)
+
+    def test_handler_save_failure_redirects_and_removes_temporary_files(
+        self, tmp_path: Path, mock_file_upload: MagicMock
+    ) -> None:
+        input_path = tmp_path / "source.png"
+        write_document_image(input_path)
+        mock_file_upload.filename = "document.png"
+        mock_file_upload.file.read.return_value = input_path.read_bytes()
+        handler = RemoveBackgroundHandler()
+        background_tasks = BackgroundTasks()
+
+        with (
+            patch("src.utils.remove_bg.remove_bg_document.cv2.imwrite", return_value=False),
+            patch.object(
+                RemoveBackgroundHandler, "_cleanup_temp_files", wraps=RemoveBackgroundHandler._cleanup_temp_files
+            ) as mock_cleanup,
+        ):
+            result = handler.handle(background_tasks=background_tasks, file=mock_file_upload)
+
+        assert isinstance(result, RedirectResponse)
+        assert result.status_code == 303
+        assert result.headers["location"] == "/remove_bg"
+        assert self._get_status(result) == "Ошибка обработки изображения: Не удалось сохранить изображение после удаления фона"
+        assert not background_tasks.tasks
+        self._assert_temporary_files_removed(mock_cleanup, expected_count=2)
+
+    def test_handler_read_failure_removes_the_created_input_file(self, mock_file_upload: MagicMock) -> None:
+        mock_file_upload.filename = "document.png"
+        mock_file_upload.file.read.side_effect = RuntimeError("Upload read error")
+        handler = RemoveBackgroundHandler()
+        background_tasks = BackgroundTasks()
+
+        with patch.object(
+            RemoveBackgroundHandler, "_cleanup_temp_files", wraps=RemoveBackgroundHandler._cleanup_temp_files
+        ) as mock_cleanup:
+            result = handler.handle(background_tasks=background_tasks, file=mock_file_upload)
+
+        assert isinstance(result, RedirectResponse)
+        assert self._get_status(result) == "Ошибка обработки изображения: Upload read error"
+        assert not background_tasks.tasks
+        self._assert_temporary_files_removed(mock_cleanup, expected_count=1)
+
+    def test_handler_cleanup_failure_preserves_original_error_and_attempts_remaining_files(
+        self, mock_file_upload: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_file_upload.filename = "document.png"
+        handler = RemoveBackgroundHandler()
+        background_tasks = BackgroundTasks()
+
+        with (
+            patch.object(BackgroundRemover, "remove", side_effect=ValueError("Processing error")) as mock_remove,
+            patch.object(Path, "unlink", side_effect=[PermissionError("Cleanup error"), None]) as mock_unlink,
+        ):
+            result = handler.handle(background_tasks=background_tasks, file=mock_file_upload)
+
+        try:
+            assert isinstance(result, RedirectResponse)
+            assert self._get_status(result) == "Ошибка обработки изображения: Processing error"
+            assert mock_unlink.call_count == 2
+            assert (
+                "src.utils.remove_bg.remove_bg_handler",
+                logging.WARNING,
+                "Не удалось удалить временный файл изображения",
+            ) in caplog.record_tuples
+
+        finally:
+            Path(mock_remove.call_args.kwargs["input_path"]).unlink(missing_ok=True)
+            Path(mock_remove.call_args.kwargs["output_path"]).unlink(missing_ok=True)
+
+    @staticmethod
+    def _get_status(response: RedirectResponse) -> str:
+        cookies = SimpleCookie()
+        cookies.load(response.headers["set-cookie"])
+        return base64.b64decode(cookies["remove_bg_status"].value).decode("utf-8")
+
+    @staticmethod
+    def _assert_temporary_files_removed(mock_cleanup: MagicMock, *, expected_count: int) -> None:
+        mock_cleanup.assert_called_once()
+        paths = mock_cleanup.call_args.args
+        assert len(paths) == expected_count
+        assert all(not path.exists() for path in paths)

@@ -1,66 +1,26 @@
-"""Утилиты для работы с secure cookies для HTTPS"""
+"""Настройки защищённых cookies."""
 
-from fastapi import Request
+import logging
+from dataclasses import dataclass
+from typing import Literal
+
 from fastapi.responses import Response
 
-
-def get_cookie_settings(request: Request) -> dict:
-    """
-    Возвращает настройки cookie для HTTPS (secure cookies)
-
-    Args:
-        request: FastAPI Request объект
-
-    Returns:
-        dict: Настройки для cookie (secure, samesite, httponly)
-    """
-    return {
-        "secure": True,
-        "samesite": "lax",
-        "httponly": True
-    }
+logger = logging.getLogger(__name__)
 
 
-def set_secure_cookie(
-    response: Response,
-    request: Request,
-    key: str,
-    value: str,
-    max_age: int | None = None
-) -> None:
-    """
-    Устанавливает cookie с автоматическими настройками безопасности
+@dataclass(frozen=True, slots=True)
+class CookiePolicy:
+    secure: bool = True
+    samesite: Literal["lax", "strict", "none"] = "lax"
+    httponly: bool = True
 
-    Args:
-        response: FastAPI Response объект
-        request: FastAPI Request объект
-        key: Имя cookie
-        value: Значение cookie
-        max_age: Время жизни cookie в секундах (опционально)
-    """
-    cookie_settings = get_cookie_settings(request)
+    def set(self, response: Response, key: str, value: str, *, max_age: int | None = None) -> None:
+        logger.debug("Установка защищённой cookie")
+        response.set_cookie(
+            key=key, value=value, max_age=max_age, secure=self.secure, samesite=self.samesite, httponly=self.httponly
+        )
 
-    response.set_cookie(
-        key=key,
-        value=value,
-        max_age=max_age,
-        **cookie_settings
-    )
-
-
-def delete_secure_cookie(response: Response, request: Request, key: str) -> None:
-    """
-    Удаляет cookie с корректными настройками безопасности
-
-    Args:
-        response: FastAPI Response объект
-        request: FastAPI Request объект
-        key: Имя cookie для удаления
-    """
-    cookie_settings = get_cookie_settings(request)
-
-    response.delete_cookie(
-        key,
-        secure=cookie_settings["secure"],
-        samesite=cookie_settings["samesite"]
-    )
+    def delete(self, response: Response, key: str) -> None:
+        logger.debug("Удаление защищённой cookie")
+        response.delete_cookie(key, secure=self.secure, samesite=self.samesite)

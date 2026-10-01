@@ -1,115 +1,100 @@
-"""
-Tests for main.py module
-"""
-import re
-from unittest.mock import MagicMock, patch
-
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import APIRouter, FastAPI
+from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.routing import Mount
+
+from src.auth import JWTDecodeError, MissingTokenError
+from src.main import application
 
 
 class TestMainApp:
-    """Tests for main application"""
+    def test_entrypoint_exports_built_application(self, app):
+        assert isinstance(app, FastAPI)
+        assert app is application.app
+        assert isinstance(application.routes.router, APIRouter)
 
-    def test_app_creation(self, app):
-        """Test FastAPI application creation"""
-        assert app is not None
-        assert hasattr(app, 'routes')
-        assert len(app.routes) > 0
-
-    def test_app_docs_disabled(self, app):
-        """Test documentation disabled"""
+    def test_documentation_pages_are_disabled(self, app):
         assert app.docs_url is None
         assert app.redoc_url is None
 
-    def test_static_files_mounted(self, app):
-        """Test static files mounting"""
-        static_routes = [route for route in app.routes if hasattr(route, 'path') and route.path.startswith('/static')]
-        assert len(static_routes) > 0
+    def test_static_files_are_mounted_once(self, app):
+        static_mounts = [route for route in app.routes if isinstance(route, Mount)]
 
-    def test_exception_handler_registered(self, app):
-        """Test exception handler registration"""
-        assert len(app.exception_handlers) > 0
+        assert len(static_mounts) == 1
+        assert static_mounts[0].path == "/static"
+        assert isinstance(static_mounts[0].app, StaticFiles)
+
+    def test_auth_exception_handlers_are_registered(self, app):
+        assert app.exception_handlers[JWTDecodeError] == application.auth.handle_jwt_error
+        assert app.exception_handlers[MissingTokenError] == application.auth.handle_jwt_error
+
+    def test_router_owns_template_engine(self):
+        templates = application.routes.templates
+
+        assert isinstance(templates, Jinja2Templates)
+        assert templates.env.get_template("home.html").filename is not None
 
 
-class TestMainRoutes:
-    """Tests for routes in main.py"""
+class TestApplicationRoutes:
+    def test_router_and_application_have_exact_routes_without_duplicates(self, app):
+        router_routes = [route for route in application.routes.router.routes if isinstance(route, APIRoute)]
+        application_routes = [route for route in app.routes if isinstance(route, APIRoute)]
+        expected_pairs = {
+            ("/", "GET"),
+            ("/", "HEAD"),
+            ("/login", "POST"),
+            ("/logout", "POST"),
+            ("/refresh", "POST"),
+            ("/home", "GET"),
+            ("/send_email", "GET"),
+            ("/send_email", "POST"),
+            ("/gen_rit_cert", "GET"),
+            ("/gen_rit_cert", "POST"),
+            ("/doctor_form", "GET"),
+            ("/doctor_form", "POST"),
+            ("/remove_bg", "GET"),
+            ("/remove_bg", "POST"),
+        }
 
-    def test_main_routes_exist(self, app):
-        """Test main routes existence"""
-        route_paths = [route.path for route in app.routes if hasattr(route, 'path')]
+        assert len(router_routes) == 13
+        assert len(application_routes) == 13
+        assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
+        assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 
-        expected_routes = [
-            "/",
-            "/login",
-            "/logout",
-            "/refresh",
-            "/home",
-            "/send_email",
-            "/gen_rit_cert",
-            "/doctor_form"
+    def test_endpoint_methods_are_bound_without_self_query_parameter(self):
+        routes = [route for route in application.routes.router.routes if isinstance(route, APIRoute)]
+
+        assert all(getattr(route.endpoint, "__self__", None) is application.routes for route in routes)
+        assert all(parameter.name != "self" for route in routes for parameter in route.dependant.query_params)
+
+    @pytest.mark.parametrize(
+        ("path", "method", "expected_dependencies"),
+        [
+            pytest.param("/", "GET", 0, id="root-get-public"),
+            pytest.param("/", "HEAD", 0, id="root-head-public"),
+            pytest.param("/login", "POST", 0, id="login-public"),
+            pytest.param("/refresh", "POST", 0, id="refresh-public"),
+            pytest.param("/logout", "POST", 1, id="logout-protected"),
+            pytest.param("/home", "GET", 1, id="home-protected"),
+            pytest.param("/send_email", "GET", 1, id="email-get-protected"),
+            pytest.param("/send_email", "POST", 1, id="email-post-protected"),
+            pytest.param("/gen_rit_cert", "GET", 1, id="certificate-get-protected"),
+            pytest.param("/gen_rit_cert", "POST", 1, id="certificate-post-protected"),
+            pytest.param("/doctor_form", "GET", 1, id="doctor-get-protected"),
+            pytest.param("/doctor_form", "POST", 1, id="doctor-post-protected"),
+            pytest.param("/remove_bg", "GET", 1, id="image-get-protected"),
+            pytest.param("/remove_bg", "POST", 1, id="image-post-protected"),
+        ],
+    )
+    def test_each_route_keeps_its_auth_dependency(self, app, path, method, expected_dependencies):
+        routes = [
+            route for route in app.routes if isinstance(route, APIRoute) and route.path == path and method in route.methods
         ]
 
-        for expected_route in expected_routes:
-            assert expected_route in route_paths, f"Route {expected_route} not found"
-
-    def test_route_methods(self, app):
-        """Test HTTP methods for routes"""
-        routes_by_method = {}
-        for route in app.routes:
-            if hasattr(route, 'path') and hasattr(route, 'methods'):
-                path = route.path
-                methods = route.methods or set()
-                for method in methods:
-                    if method not in routes_by_method:
-                        routes_by_method[method] = set()
-                    routes_by_method[method].add(path)
-
-        post_paths = routes_by_method.get("POST", set())
-        essential_post_endpoints = ["/login", "/logout", "/refresh"]
-        for endpoint in essential_post_endpoints:
-            assert endpoint in post_paths, f"Essential POST endpoint {endpoint} not found"
-
-        get_paths = routes_by_method.get("GET", set())
-        essential_get_endpoints = ["/"]
-        for endpoint in essential_get_endpoints:
-            assert endpoint in get_paths, f"Essential GET endpoint {endpoint} not found"
-
-        total_routes = len([r for r in app.routes if hasattr(r, 'path')])
-        assert total_routes >= 10, f"Expected at least 10 routes, found {total_routes}"
-
-
-class TestDateVariable:
-    """Tests for global date_now variable"""
-
-    def test_date_now_format(self):
-        """Test date_now variable formatting"""
-        import src.main
-
-        assert hasattr(src.main, 'date_now')
-        assert isinstance(src.main.date_now, str)
-        date_pattern = r'^\d{2}\.\d{2}\.\d{2}$'
-        assert re.match(date_pattern, src.main.date_now), f"date_now format is incorrect: {src.main.date_now}"
-
-
-class TestDependencies:
-    """Tests for dependencies"""
-
-    def test_dependencies_defined(self):
-        """Test dependencies definition"""
-        from src.main import dependencies
-
-        assert dependencies is not None
-        assert isinstance(dependencies, list)
-        assert len(dependencies) > 0
-
-
-class TestTemplateEngine:
-    """Tests for template engine"""
-
-    def test_templates_configured(self):
-        """Test template engine configuration"""
-        from src.main import templates
-
-        assert templates is not None
-        assert hasattr(templates, 'get_template') or hasattr(templates, 'env')
+        assert len(routes) == 1
+        dependencies = routes[0].dependant.dependencies
+        assert len(dependencies) == expected_dependencies
+        auth_dependency = application.routes.dependencies[0].dependency
+        assert all(dependency.call is auth_dependency for dependency in dependencies)

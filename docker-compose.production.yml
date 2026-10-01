@@ -9,8 +9,6 @@ services:
     env_file:
       - .env
     volumes:
-      # Монтируем только шаблоны (не код) - чтобы их можно было менять на сервере без пересборки
-      # Код (gen_cert_handler.py и т.д.) берется из Docker образа
       - ./src/utils/gen_cert/Сертификат_шаблон.pptx:/app/src/utils/gen_cert/Сертификат_шаблон.pptx:ro
       - ./src/utils/doctor_form/Бланк Врача.pptx:/app/src/utils/doctor_form/Бланк Врача.pptx:ro
       - ./src/utils/doctor_form/Бланк врача на печать.pptx:/app/src/utils/doctor_form/Бланк врача на печать.pptx:ro

@@ -1,159 +1,152 @@
-import os
 import datetime
+import logging
+import os
 import uuid
-from typing import Set
-from fastapi import Request, Form, Depends
-from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from dataclasses import dataclass, field
+
 from authx import AuthX, AuthXConfig
-from .cookie_utils import set_secure_cookie
 from authx.exceptions import JWTDecodeError
 from dotenv import load_dotenv
+from fastapi import Form, Request
+from fastapi.params import Depends
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.templating import Jinja2Templates
 
+from .cookie_utils import CookiePolicy
+
+logger = logging.getLogger(__name__)
 load_dotenv()
 
-REVOKED_TOKENS: Set[str] = set()
 
-config = AuthXConfig()
-config.JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
-config.JWT_ACCESS_COOKIE_NAME = "JWT_ACCESS_TOKEN_COOKIE"
-config.JWT_REFRESH_COOKIE_NAME = "JWT_REFRESH_TOKEN_COOKIE"
-config.JWT_ACCESS_TOKEN_EXPIRES = datetime.timedelta(minutes=15)
-config.JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(days=7)
-config.JWT_TOKEN_LOCATION = ["cookies"]
-config.JWT_COOKIE_CSRF_PROTECT = False
-config.JWT_COOKIE_SECURE = True
-config.JWT_COOKIE_SAMESITE = "strict"
-security: AuthX = AuthX(config=config)
+@dataclass(frozen=True, slots=True)
+class Credentials:
+    username: str | None = field(repr=False)
+    password: str | None = field(repr=False)
 
-LOGIN = os.getenv('LOGIN')
-PASSWORD = os.getenv('PASSWORD')
+    def matches(self, username: str, password: str) -> bool:
+        return username == self.username and password == self.password
 
-templates = Jinja2Templates(directory="templates")
 
-def get_auth_dependency():
-    return Depends(security.access_token_required)
+class AuthenticationService:
+    def __init__(self, credentials: Credentials, security: AuthX, *, templates: Jinja2Templates | None = None) -> None:
+        self.credentials = credentials
+        self.security = security
+        self.config = security.config
+        self.templates = templates or Jinja2Templates(directory="templates")
+        self.cookies = CookiePolicy()
+        self.revoked_tokens: set[str] = set()
 
-def login_handler(
-    request: Request, username: str = Form(...), password: str = Form(...)
-    ):
-    """Обработчик авторизации"""
-    if username == LOGIN and password == PASSWORD:
+    @classmethod
+    def from_env(cls) -> "AuthenticationService":
+        return cls(Credentials(os.getenv("LOGIN"), os.getenv("PASSWORD")), cls._create_security())
+
+    def dependency(self) -> Depends:
+        logger.debug("Подготовка проверки токена доступа")
+        return Depends(self.security.access_token_required)
+
+    def login(self, request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
+        logger.info("Начата авторизация")
+
+        if not self.credentials.matches(username, password):
+            logger.warning("Авторизация отклонена: неверные учётные данные")
+            return self.templates.TemplateResponse(
+                request, "login.html", {"error": "Неверный логин или пароль"}, status_code=401
+            )
+
         response = RedirectResponse(url="/home", status_code=303)
-
-        access_token = security.create_access_token(
-            uid='1',
-            jti=str(uuid.uuid4())
-        )
-        set_secure_cookie(response, request, config.JWT_ACCESS_COOKIE_NAME, access_token)
-
-        refresh_token = security.create_refresh_token(
-            uid='1',
-            jti=str(uuid.uuid4())
-        )
-        set_secure_cookie(
-            response, request, config.JWT_REFRESH_COOKIE_NAME, refresh_token,
-            max_age=7*24*60*60
-        )
-
+        access_token = self.security.create_access_token(uid="1", jti=f"{uuid.uuid4()}")
+        refresh_token = self.security.create_refresh_token(uid="1", jti=f"{uuid.uuid4()}")
+        self.cookies.set(response, self.config.JWT_ACCESS_COOKIE_NAME, access_token)
+        self.cookies.set(response, self.config.JWT_REFRESH_COOKIE_NAME, refresh_token, max_age=7 * 24 * 60 * 60)
+        logger.info("Авторизация выполнена")
         return response
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"error": "Неверный логин или пароль"},
-        status_code=401
-    )
 
-def logout_handler(request: Request):
-    """Обработчик выхода из системы"""
-    refresh_token = request.cookies.get(config.JWT_REFRESH_COOKIE_NAME)
-    if refresh_token:
-        REVOKED_TOKENS.add(refresh_token)
+    def logout(self, request: Request) -> RedirectResponse:
+        logger.info("Начат выход из системы")
 
-    response = RedirectResponse(url="/", status_code=303)
-    response.delete_cookie(
-        key=config.JWT_ACCESS_COOKIE_NAME,
-        path="/",
-        domain=None,
-        secure=True,
-        httponly=True,
-        samesite="strict"
-    )
-    response.delete_cookie(
-        key=config.JWT_REFRESH_COOKIE_NAME,
-        path="/",
-        domain=None,
-        secure=True,
-        httponly=True,
-        samesite="strict"
-    )
-    return response
+        if refresh_token := request.cookies.get(self.config.JWT_REFRESH_COOKIE_NAME):
+            self.revoked_tokens.add(refresh_token)
 
-def refresh_token_handler(request: Request):
-    """Обработчик обновления токена доступа"""
-    refresh_token = request.cookies.get(config.JWT_REFRESH_COOKIE_NAME)
-
-    if not refresh_token:
-        return RedirectResponse(url="/", status_code=303)
-
-    if refresh_token in REVOKED_TOKENS:
         response = RedirectResponse(url="/", status_code=303)
-        response.delete_cookie(
-            config.JWT_ACCESS_COOKIE_NAME, secure=True, samesite="strict"
-            )
-        response.delete_cookie(
-            config.JWT_REFRESH_COOKIE_NAME,secure=True, samesite="strict"
-            )
+
+        for key in (self.config.JWT_ACCESS_COOKIE_NAME, self.config.JWT_REFRESH_COOKIE_NAME):
+            response.delete_cookie(key=key, path="/", domain=None, secure=True, httponly=True, samesite="strict")
+
+        logger.info("Выход из системы выполнен")
         return response
 
-    try:
-        payload = security._decode_token(refresh_token)
-        if not hasattr(payload, 'jti'):
-            raise Exception("Invalid token format")
+    def refresh(self, request: Request) -> RedirectResponse:
+        logger.info("Начато обновление токена доступа")
+        refresh_token = request.cookies.get(self.config.JWT_REFRESH_COOKIE_NAME)
 
-        new_access_token = security.create_access_token(
-            uid=payload.sub,
-            jti=str(uuid.uuid4())
-        )
-        response = RedirectResponse(url="/home", status_code=303)
-        response.set_cookie(
-            key=config.JWT_ACCESS_COOKIE_NAME,
-            value=new_access_token,
-            httponly=True,
-            secure=True,
-            samesite="strict"
-        )
-        return response
-    except Exception:
+        if not refresh_token:
+            logger.warning("Обновление токена отклонено: токен обновления отсутствует")
+            return RedirectResponse(url="/", status_code=303)
+
+        if refresh_token in self.revoked_tokens:
+            logger.warning("Обновление токена отклонено: токен обновления отозван")
+            return self._clear_session()
+
+        try:
+            payload = self.security._decode_token(refresh_token)
+
+            if not hasattr(payload, "jti"):
+                raise ValueError("Invalid token format")
+
+            new_access_token = self.security.create_access_token(uid=payload.sub, jti=f"{uuid.uuid4()}")
+            response = RedirectResponse(url="/home", status_code=303)
+            response.set_cookie(
+                key=self.config.JWT_ACCESS_COOKIE_NAME, value=new_access_token, httponly=True, secure=True, samesite="strict"
+            )
+            logger.info("Токен доступа обновлён")
+            return response
+
+        except Exception:
+            logger.warning("Обновление токена отклонено: не удалось проверить токен")
+            return self._clear_session()
+
+    async def handle_jwt_error(self, request: Request, exc: Exception) -> Response:
+        logger.warning("Запрос отклонён: ошибка проверки JWT")
+
+        if isinstance(exc, JWTDecodeError) and "expired" in f"{exc}".lower():
+
+            if request.headers.get("accept") == "application/json":
+                return JSONResponse(status_code=401, content={"detail": "Token expired"})
+
+            return self._clear_session(refresh=False)
+
+        return self._clear_session()
+
+    def check_status(self, request: Request) -> Response:
+        logger.debug("Проверка наличия авторизации")
+
+        if request.cookies.get(self.config.JWT_ACCESS_COOKIE_NAME):
+            return RedirectResponse(url="/home", status_code=303)
+
+        return self.templates.TemplateResponse(request, "login.html")
+
+    def _clear_session(self, *, refresh: bool = True) -> RedirectResponse:
         response = RedirectResponse(url="/", status_code=303)
-        response.delete_cookie(
-            config.JWT_ACCESS_COOKIE_NAME, secure=True, samesite="strict"
-            )
-        response.delete_cookie(
-            config.JWT_REFRESH_COOKIE_NAME, secure=True, samesite="strict"
-            )
+        response.delete_cookie(self.config.JWT_ACCESS_COOKIE_NAME, secure=True, samesite="strict")
+
+        if refresh:
+            response.delete_cookie(self.config.JWT_REFRESH_COOKIE_NAME, secure=True, samesite="strict")
+
         return response
 
-async def jwt_decode_exception_handler(request: Request, exc: Exception):
-    """Обработчик ошибок JWT декодирования"""
-    if isinstance(exc, JWTDecodeError) and "expired" in str(exc).lower():
-        if request.headers.get("accept") == "application/json":
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Token expired"}
-            )
+    @staticmethod
+    def _create_security() -> AuthX:
+        config = AuthXConfig()
+        config.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+        config.JWT_ACCESS_COOKIE_NAME = "JWT_ACCESS_TOKEN_COOKIE"
+        config.JWT_REFRESH_COOKIE_NAME = "JWT_REFRESH_TOKEN_COOKIE"
+        config.JWT_ACCESS_TOKEN_EXPIRES = datetime.timedelta(minutes=15)
+        config.JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(days=7)
+        config.JWT_TOKEN_LOCATION = ["cookies"]
+        config.JWT_COOKIE_CSRF_PROTECT = False
+        config.JWT_COOKIE_SECURE = True
+        config.JWT_COOKIE_SAMESITE = "strict"
+        return AuthX(config=config)
 
-        refresh_response = RedirectResponse(url="/", status_code=303)
-        refresh_response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
-        return refresh_response
 
-    response = RedirectResponse(url="/", status_code=303)
-    response.delete_cookie(config.JWT_ACCESS_COOKIE_NAME)
-    response.delete_cookie(config.JWT_REFRESH_COOKIE_NAME)
-    return response
-
-def check_auth_status(request: Request):
-    """Проверка статуса авторизации"""
-    if request.cookies.get(config.JWT_ACCESS_COOKIE_NAME):
-        return RedirectResponse(url="/home", status_code=303)
-    return templates.TemplateResponse(request, "login.html")
+auth_service = AuthenticationService.from_env()
