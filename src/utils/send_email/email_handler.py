@@ -1,85 +1,150 @@
-import os
-import datetime
-import smtplib
 import base64
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import datetime
+import logging
+import os
+import re
+import smtplib
+from contextlib import closing
+from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
-from fastapi import Form, UploadFile, File, Request
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import BinaryIO
+
+from fastapi import UploadFile
 from fastapi.responses import RedirectResponse
+
 from src.utils.send_email.email_templates import get_email_template
 
+logger = logging.getLogger(__name__)
 
-SEND_FROM = os.getenv('SEND_FROM')
-EMAIL_PASS = os.getenv('EMAIL_PASS')
-ADDR_TO = os.getenv('ADDR_TO')
-BCC_TO = os.getenv('BCC_TO')
 
-def send_email_handler(
-    request: Request,
-    qr_pay: str | None = Form(None),
-    cashless_pay: str | None = Form(None),
-    card_pay: str | None = Form(None),
-    cash_pay: str | None = Form(None),
-    attachment: UploadFile = File(...)
-):
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PaymentReport:
+    cashless: str | None = None
+    card: str | None = None
+    qr: str | None = None
+    cash: str | None = None
 
-    time_now = datetime.datetime.now().strftime("%H:%M")
-    date_now = datetime.datetime.now().strftime("%d.%m.%y")
-    template = get_email_template()
-
-    cashless_payment = str(cashless_pay)
-    card_pay = str(card_pay)
-    cash_pay = str(cash_pay)
-    qr_pay = str(qr_pay)
-
-    body_cashless = ''
-    body_card = ''
-    body_cash = ''
-    body_qr = ''
-
-    if cashless_payment:
-        body_cashless = f'Безналичная оплата: {cashless_payment}\n'
-    if card_pay:
-        body_card = f'На карту: {card_pay}\n'
-    if cash_pay:
-        body_cash = f'Наличные: {cash_pay}\n'
-    if qr_pay:
-        body_qr = f'QR-код: {qr_pay}\n'
-
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = SEND_FROM or ""
-        msg['To'] = ADDR_TO or ""
-        msg['Subject'] = date_now
-        msg['Bcc'] = BCC_TO or ""
-
-        body = template.format(
-            body_cashless=body_cashless,
-            body_card=body_card,
-            body_qr=body_qr,
-            body_cash=body_cash
+    def render(self, template: str) -> str:
+        payments = (
+            ("body_cashless", "Безналичная оплата", self.cashless),
+            ("body_card", "На карту", self.card),
+            ("body_qr", "QR-код", self.qr),
+            ("body_cash", "Наличные", self.cash),
         )
-        msg.attach(MIMEText(body, 'plain'))
+        body_values = {name: f"{label}: {amount}\n" if amount else "" for name, label, amount in payments}
+        return template.format(**body_values)
 
-        file_data = attachment.file.read()
-        part = MIMEApplication(file_data, Name=date_now + '.xlsx')
-        part['Content-Disposition'] = f'attachment; filename="{date_now}.xlsx"'
-        msg.attach(part)
 
-        server = smtplib.SMTP_SSL('smtp.yandex.ru', 465)
-        server.login(SEND_FROM or "", EMAIL_PASS or "")
-        server.send_message(msg)
-        server.quit()
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SMTPSettings:
+    sender: str
+    password: str = field(repr=False)
+    recipient: str
+    bcc: str = ""
+    host: str = "smtp.yandex.ru"
+    port: int = 465
+    timeout: float = 30.0
 
-    except smtplib.SMTPAuthenticationError:
-        status = "Ошибка отправки: неверные учетные данные"
-    except Exception as e:
-        status = f"Ошибка отправки: {str(e)}"
-    else:
-        status = f"Письмо успешно отправлено в {time_now}"
+    @classmethod
+    def from_env(cls) -> "SMTPSettings":
+        return cls(
+            sender=os.getenv("SEND_FROM") or "",
+            password=os.getenv("EMAIL_PASS") or "",
+            recipient=os.getenv("ADDR_TO") or "",
+            bcc=os.getenv("BCC_TO") or "",
+        )
 
-    response = RedirectResponse(url="/send_email", status_code=303)
-    encoded_status = base64.b64encode(status.encode('utf-8')).decode('ascii')
-    response.set_cookie("email_status", encoded_status, max_age=10)
-    return response
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EmailService:
+    settings: SMTPSettings
+
+    def build_message(self, *, report: PaymentReport, attachment_content: bytes, date_label: str) -> MIMEMultipart:
+        message = MIMEMultipart()
+        message["From"] = self.settings.sender
+        message["To"] = self.settings.recipient
+        message["Subject"] = date_label
+        message["Bcc"] = self.settings.bcc
+        body = report.render(get_email_template())
+        message.attach(MIMEText(self._normalize_message(body), "plain"))
+
+        attachment_part = MIMEApplication(attachment_content, Name=f"{date_label}.xlsx")
+        attachment_part["Content-Disposition"] = f'attachment; filename="{date_label}.xlsx"'
+        message.attach(attachment_part)
+        return message
+
+    def send(self, *, report: PaymentReport, attachment: BinaryIO) -> str:
+        logger.info("Начата отправка письма")
+        sent_at = datetime.datetime.now()
+
+        try:
+            message = self.build_message(
+                report=report,
+                attachment_content=attachment.read(),
+                date_label=sent_at.strftime("%d.%m.%y"),
+            )
+
+            with closing(smtplib.SMTP_SSL(self.settings.host, self.settings.port, timeout=self.settings.timeout)) as server:
+                server.login(self.settings.sender, self.settings.password)
+                server.send_message(message)
+                server.quit()
+
+        except smtplib.SMTPAuthenticationError as exc:
+            logger.exception("SMTP отклонил авторизацию")
+            smtp_error = exc.smtp_error
+            smtp_error_text = smtp_error.decode("utf-8", errors="replace") if isinstance(smtp_error, bytes) else smtp_error
+
+            if exc.smtp_code == 525 and "SMTP disabled" in smtp_error_text:
+                return "Ошибка отправки: SMTP отключён для этого почтового ящика"
+
+            return "Ошибка отправки: проверьте настройки доступа к почте"
+
+        except Exception:
+            logger.exception("Не удалось отправить письмо")
+            return "Ошибка отправки письма. Подробности — в логах сервера"
+
+        logger.info("Письмо успешно отправлено")
+        return f"Письмо успешно отправлено в {sent_at.strftime('%H:%M')}"
+
+    @staticmethod
+    def _normalize_message(message: str) -> str:
+        """Убирает пробелы и табуляцию после «(» и перед «)», сохраняя остальное форматирование сообщения."""
+
+        logger.debug("Нормализация пробелов внутри скобок")
+
+        def replace_spacing(match: re.Match[str]) -> str:
+            before = message[match.start() - 1 : match.start()]
+            after = message[match.end() : match.end() + 1]
+
+            if before == "(" or after == ")":
+                return ""
+
+            return match.group()
+
+        return re.sub(r"[ \t]+", replace_spacing, message)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EmailHandler:
+    service: EmailService = field(
+        default_factory=lambda: EmailService(settings=SMTPSettings.from_env()),
+        repr=False,
+    )
+
+    def handle(
+        self,
+        *,
+        attachment: UploadFile,
+        qr_pay: str | None = None,
+        cashless_pay: str | None = None,
+        card_pay: str | None = None,
+        cash_pay: str | None = None,
+    ) -> RedirectResponse:
+        report = PaymentReport(cashless=cashless_pay, card=card_pay, qr=qr_pay, cash=cash_pay)
+        status = self.service.send(report=report, attachment=attachment.file)
+        response = RedirectResponse(url="/send_email", status_code=303)
+        encoded_status = base64.b64encode(status.encode("utf-8")).decode("ascii")
+        response.set_cookie("email_status", encoded_status, max_age=10)
+        return response

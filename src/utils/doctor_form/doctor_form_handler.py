@@ -1,127 +1,147 @@
+import base64
 import datetime
 import locale
+import logging
 import tempfile
-import os
-import base64
-from fastapi import Form, Request, BackgroundTasks
+from dataclasses import dataclass
+from pathlib import Path
+
+from fastapi import BackgroundTasks
 from fastapi.responses import FileResponse, RedirectResponse
 from pptx import Presentation
+from pptx.presentation import Presentation as PptxPresentation
 
-try:
-    locale.setlocale(locale.LC_ALL, 'ru_RU.UTF-8')
-except locale.Error:
+logger = logging.getLogger(__name__)
+
+for locale_name in ("ru_RU.UTF-8", "ru_RU", "en_US.UTF-8", "C.UTF-8", "C"):
     try:
-        locale.setlocale(locale.LC_ALL, 'ru_RU')
+        locale.setlocale(locale.LC_ALL, locale_name)
+        break
     except locale.Error:
+        if locale_name == "C":
+            raise
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorFormRequest:
+    doctors: tuple[str | None, ...] = (None, None, None, None)
+    patients: tuple[str | None, ...] = (None, None, None, None)
+    date: str | None = None
+
+
+class DoctorFormGenerator:
+    def __init__(self, *, template_path: Path | None = None) -> None:
+        self.template_path = template_path or Path(__file__).with_name("Бланк Врача.pptx")
+
+    def generate(self, data: DoctorFormRequest) -> FileResponse | RedirectResponse:
+        logger.info("Начата обработка запроса на создание бланка врача")
+        output_path: str | None = None
+
         try:
-            locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
-        except locale.Error:
-            try:
-                locale.setlocale(locale.LC_ALL, 'C.UTF-8')
-            except locale.Error:
-                locale.setlocale(locale.LC_ALL, 'C')
+            replacements = self._get_replacements(data)
 
+            if not self.template_path.exists():
+                logger.error("Файл шаблона не найден")
+                raise FileNotFoundError(f"Файл шаблона не найден: {self.template_path}")
 
-def get_current_date():
-    """Получить текущую дату и вернуть день, месяц и год."""
-    now = datetime.datetime.now()
-    try:
-        month_name = now.strftime("%B")
-    except (OSError, ValueError):
-        month_mapping = {
-            'January': 'января', 'February': 'февраля', 'March': 'марта',
-            'April': 'апреля', 'May': 'мая', 'June': 'июня',
-            'July': 'июля', 'August': 'августа', 'September': 'сентября',
-            'October': 'октября', 'November': 'ноября', 'December': 'декабря'
-        }
-        month_name = month_mapping.get(now.strftime("%B"), now.strftime("%B"))
-    
-    return now.day, month_name, now.year
+            presentation = Presentation(f"{self.template_path}")
+            self._replace_text(presentation, replacements)
 
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as output_file:
+                output_path = output_file.name
 
-def doctor_form_handler(
-    request: Request,
-    doctor_1: str | None = Form(None),
-    doctor_2: str | None = Form(None), 
-    doctor_3: str | None = Form(None),
-    doctor_4: str | None = Form(None),
-    patient_1: str | None = Form(None),
-    patient_2: str | None = Form(None),
-    patient_3: str | None = Form(None),
-    patient_4: str | None = Form(None),
-    date: str | None = Form(None)
-):
-    try:
-        day, month, year = get_current_date()
-        
-        if date and date.strip() and date.isdigit():
-            day = int(date)
-        
-        template_path = os.path.join(
-            os.path.dirname(__file__), 
-            'Бланк Врача.pptx'
-        )
-        
-        if not os.path.exists(template_path):
-            raise FileNotFoundError(
-                f"Файл шаблона не найден: {template_path}"
+            presentation.save(output_path)
+            background_tasks = BackgroundTasks()
+            background_tasks.add_task(self._cleanup, output_path)
+            logger.info("Бланк врача создан и подготовлен к отправке")
+            return FileResponse(
+                path=output_path,
+                filename="Бланк Врача на печать.pptx",
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                background=background_tasks,
             )
-        
-        prs = Presentation(template_path)
-        
-        replacements = {
-            'Doctor_1': f'ВРАЧ: {doctor_1}' if doctor_1 else 'Doctor_1',
-            'Doctor_2': f'ВРАЧ: {doctor_2}' if doctor_2 else 'Doctor_2',
-            'Doctor_3': f'ВРАЧ: {doctor_3}' if doctor_3 else 'Doctor_3',
-            'Doctor_4': f'ВРАЧ: {doctor_4}' if doctor_4 else 'Doctor_4',
-            'Patient_1': f'ПАЦИЕНТ: {patient_1.upper()}' if patient_1 else 'Patient_1',
-            'Patient_2': f'ПАЦИЕНТ: {patient_2.upper()}' if patient_2 else 'Patient_2',
-            'Patient_3': f'ПАЦИЕНТ: {patient_3.upper()}' if patient_3 else 'Patient_3',
-            'Patient_4': f'ПАЦИЕНТ: {patient_4.upper()}' if patient_4 else 'Patient_4',
-            'Дата': f'«{day}» {month} {year} г.'
-        }
-        
-        for slide in prs.slides:
+
+        except Exception as exc:
+            logger.exception("Не удалось создать бланк врача")
+
+            if output_path is not None:
+                self._cleanup(output_path)
+
+            status = f"Ошибка обработки файла: {exc}"
+            response = RedirectResponse(url="/doctor_form", status_code=303)
+            encoded_status = base64.b64encode(status.encode("utf-8")).decode("ascii")
+            response.set_cookie("doctor_form_status", encoded_status, max_age=10)
+            return response
+
+    def _get_replacements(self, data: DoctorFormRequest) -> dict[str, str]:
+        day, month, year = self._get_current_date()
+
+        if data.date and data.date.strip() and data.date.isdigit():
+            day = int(data.date)
+
+        replacements: dict[str, str] = {}
+
+        for slot, doctor in enumerate(data.doctors, start=1):
+            placeholder = f"Doctor_{slot}"
+            replacements[placeholder] = f"ВРАЧ: {doctor}" if doctor else placeholder
+
+        for slot, patient in enumerate(data.patients, start=1):
+            placeholder = f"Patient_{slot}"
+            replacements[placeholder] = f"ПАЦИЕНТ: {patient.upper()}" if patient else placeholder
+
+        replacements["Дата"] = f"«{day}» {month} {year} г."
+        return replacements
+
+    @staticmethod
+    def _get_current_date() -> tuple[int, str, int]:
+        logger.debug("Получение текущей даты")
+        now = datetime.datetime.now()
+
+        try:
+            month_name = now.strftime("%B")
+
+        except (OSError, ValueError):
+            month_mapping = {
+                "January": "января",
+                "February": "февраля",
+                "March": "марта",
+                "April": "апреля",
+                "May": "мая",
+                "June": "июня",
+                "July": "июля",
+                "August": "августа",
+                "September": "сентября",
+                "October": "октября",
+                "November": "ноября",
+                "December": "декабря",
+            }
+            month_name = now.strftime("%B")
+            month_name = month_mapping.get(month_name, month_name)
+
+        logger.debug("Текущая дата получена")
+        return now.day, month_name, now.year
+
+    @staticmethod
+    def _replace_text(presentation: PptxPresentation, replacements: dict[str, str]) -> None:
+        for slide in presentation.slides:
             for shape in slide.shapes:
                 if not shape.has_text_frame:
                     continue
+
                 for paragraph in shape.text_frame.paragraphs:
                     for run in paragraph.runs:
-                        for key, value in replacements.items():
-                            if key in run.text:
-                                run.text = run.text.replace(key, value)
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as temp_output:
-            temp_output_path = temp_output.name
-        
-        prs.save(temp_output_path)
-        
-        output_filename = "Бланк Врача на печать.pptx"
-        
-        def cleanup_temp_file():
-            try:
-                os.unlink(temp_output_path)
-            except OSError:
-                pass
-        
-        media_type = (
-            'application/vnd.openxmlformats-officedocument.'
-            'presentationml.presentation'
-        )
-        
-        background_tasks = BackgroundTasks()
-        background_tasks.add_task(cleanup_temp_file)
-        
-        return FileResponse(
-            path=temp_output_path,
-            filename=output_filename,
-            media_type=media_type,
-            background=background_tasks
-        )
-        
-    except Exception as e:
-        status = f"Ошибка обработки файла: {str(e)}"
-        response = RedirectResponse(url="/doctor_form", status_code=303)
-        encoded_status = base64.b64encode(status.encode('utf-8')).decode('ascii')
-        response.set_cookie("doctor_form_status", encoded_status, max_age=10)
-        return response
+                        for placeholder, value in replacements.items():
+                            if placeholder in run.text:
+                                run.text = run.text.replace(placeholder, value)
+
+    @staticmethod
+    def _cleanup(output_path: str) -> None:
+        logger.debug("Начата очистка временного файла бланка врача")
+
+        try:
+            Path(output_path).unlink()
+
+        except OSError:
+            logger.warning("Не удалось удалить временный файл бланка врача")
+        else:
+            logger.debug("Временный файл бланка врача удалён")

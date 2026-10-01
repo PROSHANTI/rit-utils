@@ -1,85 +1,88 @@
-import os
-import tempfile
 import base64
-from fastapi import File, Form, Request, UploadFile, BackgroundTasks
+import logging
+import tempfile
+from pathlib import Path
+
+from fastapi import BackgroundTasks, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 
-from src.utils.remove_bg.remove_bg_document import remove_background, parse_rgb_color
+from src.utils.remove_bg.remove_bg_document import BackgroundRemovalOptions, BackgroundRemover
+
+logger = logging.getLogger(__name__)
 
 
-def remove_bg_handler(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    color: str | None = Form(None)
-):
-    """
-    Handler for removing background from uploaded image.
+class RemoveBackgroundHandler:
+    ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
 
-    Args:
-        request: FastAPI request object
-        background_tasks: Background tasks for cleanup
-        file: Uploaded image file
-        color: RGB color string in format "R,G,B" (default: black "0,0,0")
-    """
-    try:
-        if not file.filename:
-            raise ValueError("Файл не был загружен")
+    def handle(
+        self, *, background_tasks: BackgroundTasks, file: UploadFile, color: str | None = None
+    ) -> FileResponse | RedirectResponse:
+        logger.info("Начата обработка запроса на удаление фона изображения")
+        temporary_paths: list[Path] = []
 
-        allowed_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif'}
-        file_ext = os.path.splitext(file.filename)[1].lower()
+        try:
+            if not file.filename:
+                raise ValueError("Файл не был загружен")
 
-        if file_ext not in allowed_extensions:
-            raise ValueError(
-                f"Неподдерживаемый формат файла. "
-                f"Поддерживаемые форматы: {', '.join(allowed_extensions)}"
+            file_extension = self._validate_extension(file.filename)
+            text_color = self._parse_color(color)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_input:
+                temp_input_path = temp_input.name
+                temporary_paths.append(Path(temp_input_path))
+                temp_input.write(file.file.read())
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_output:
+                temp_output_path = temp_output.name
+                temporary_paths.append(Path(temp_output_path))
+
+            options = BackgroundRemovalOptions(text_color=text_color)
+            BackgroundRemover(options).remove(input_path=temp_input_path, output_path=temp_output_path)
+            output_filename = f"{Path(file.filename).stem}_no_bg.png"
+            background_tasks.add_task(self._cleanup_temp_files, *temporary_paths)
+
+            logger.info("Изображение обработано и подготовлено к отправке")
+            return FileResponse(
+                path=temp_output_path, filename=output_filename, media_type="image/png", background=background_tasks
             )
 
-        text_color = None
-        if color:
+        except Exception as exc:
+            logger.exception("Не удалось обработать изображение")
+            self._cleanup_temp_files(*temporary_paths)
+            status = f"Ошибка обработки изображения: {exc}"
+            response = RedirectResponse(url="/remove_bg", status_code=303)
+            encoded_status = base64.b64encode(status.encode("utf-8")).decode("ascii")
+            response.set_cookie("remove_bg_status", encoded_status, max_age=10)
+            return response
+
+    def _validate_extension(self, filename: str) -> str:
+        file_extension = Path(filename).suffix.lower()
+
+        if file_extension not in self.ALLOWED_EXTENSIONS:
+            raise ValueError(f"Неподдерживаемый формат файла. Поддерживаемые форматы: {', '.join(self.ALLOWED_EXTENSIONS)}")
+
+        return file_extension
+
+    @staticmethod
+    def _parse_color(color: str | None) -> tuple[int, int, int]:
+        if not color:
+            return 0, 0, 0
+
+        try:
+            return BackgroundRemover.parse_color(color)
+
+        except ValueError as exc:
+            raise ValueError(f"Неверный формат цвета: {exc}. Используйте формат 'R,G,B' (например, '255,0,0')") from exc
+
+    @staticmethod
+    def _cleanup_temp_files(*paths: Path) -> None:
+        logger.debug("Начата очистка временных файлов изображения")
+
+        for path in paths:
             try:
-                text_color = parse_rgb_color(color)
-            except ValueError as e:
-                raise ValueError(f"Неверный формат цвета: {e}. Используйте формат 'R,G,B' (например, '255,0,0')")
-        else:
-            text_color = (0, 0, 0)
+                path.unlink(missing_ok=True)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_input:
-            temp_input_path = temp_input.name
-            content = file.file.read()
-            temp_input.write(content)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_output:
-            temp_output_path = temp_output.name
-
-        remove_background(
-            input_path=temp_input_path,
-            output_path=temp_output_path,
-            invert=False,
-            text_color=text_color
-        )
-
-        output_filename = f"{os.path.splitext(file.filename)[0]}_no_bg.png"
-
-        def cleanup_temp_files():
-            try:
-                os.unlink(temp_input_path)
-                os.unlink(temp_output_path)
             except OSError:
-                pass
+                logger.warning("Не удалось удалить временный файл изображения", exc_info=True)
 
-        background_tasks.add_task(cleanup_temp_files)
-
-        return FileResponse(
-            path=temp_output_path,
-            filename=output_filename,
-            media_type='image/png',
-            background=background_tasks
-        )
-
-    except Exception as e:
-        status = f"Ошибка обработки изображения: {str(e)}"
-        response = RedirectResponse(url="/remove_bg", status_code=303)
-        encoded_status = base64.b64encode(status.encode('utf-8')).decode('ascii')
-        response.set_cookie("remove_bg_status", encoded_status, max_age=10)
-        return response
+        logger.debug("Очистка временных файлов изображения завершена")

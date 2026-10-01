@@ -1,221 +1,138 @@
-"""
-Tests for doctor_form/doctor_form_handler.py module
-"""
+import base64
+from http.cookies import SimpleCookie
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.responses import FileResponse, RedirectResponse
 
-from src.utils.doctor_form.doctor_form_handler import (
-    doctor_form_handler,
-    get_current_date,
-)
+from src.utils.doctor_form.doctor_form_handler import DoctorFormGenerator, DoctorFormRequest
 
 
-class TestGetCurrentDate:
-    """Tests for getting current date"""
-
-    @patch('src.utils.doctor_form.doctor_form_handler.datetime')
-    def test_get_current_date_success(self, mock_datetime):
-        """Test successful date retrieval"""
-        mock_now = MagicMock()
+class TestDoctorFormGenerator:
+    @patch("src.utils.doctor_form.doctor_form_handler.datetime")
+    def test_current_date_uses_system_locale(self, mock_datetime):
+        mock_now = mock_datetime.datetime.now.return_value
         mock_now.day = 15
-        mock_now.strftime.return_value = "март"
         mock_now.year = 2024
-        mock_datetime.datetime.now.return_value = mock_now
+        mock_now.strftime.return_value = "марта"
 
-        day, month, year = get_current_date()
+        result = DoctorFormGenerator._get_current_date()
 
-        assert day == 15
-        assert month == "март"
-        assert year == 2024
+        assert result == (15, "марта", 2024)
 
-    @patch('src.utils.doctor_form.doctor_form_handler.datetime')
-    def test_get_current_date_locale_fallback(self, mock_datetime):
-        """Test locale fallback"""
-        mock_now = MagicMock()
+    @pytest.mark.parametrize(
+        ("locale_error", "month_name", "expected_month"),
+        [
+            pytest.param(OSError("Locale error"), "January", "января", id="known-month"),
+            pytest.param(ValueError("Locale error"), "UnknownMonth", "UnknownMonth", id="unknown-month"),
+        ],
+    )
+    @patch("src.utils.doctor_form.doctor_form_handler.datetime")
+    def test_current_date_falls_back_when_locale_fails(self, mock_datetime, locale_error, month_name, expected_month):
+        mock_now = mock_datetime.datetime.now.return_value
         mock_now.day = 1
         mock_now.year = 2024
-        mock_now.strftime.side_effect = [OSError("Locale error"), "January", "January"]
-        mock_datetime.datetime.now.return_value = mock_now
+        mock_now.strftime.side_effect = [locale_error, month_name]
 
-        day, month, year = get_current_date()
+        result = DoctorFormGenerator._get_current_date()
 
-        assert day == 1
-        assert month == "января"
-        assert year == 2024
+        assert result == (1, expected_month, 2024)
 
-    @patch('src.utils.doctor_form.doctor_form_handler.datetime')
-    def test_get_current_date_unknown_month(self, mock_datetime):
-        """Test unknown month handling"""
-        mock_now = MagicMock()
-        mock_now.day = 1
-        mock_now.year = 2024
-        mock_now.strftime.side_effect = [OSError("Locale error"), "UnknownMonth", "UnknownMonth"]
-        mock_datetime.datetime.now.return_value = mock_now
-
-        day, month, year = get_current_date()
-
-        assert day == 1
-        assert month == "UnknownMonth"
-        assert year == 2024
-
-
-class TestDoctorFormHandler:
-    """Tests for doctor form handler"""
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_success(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test successful doctor form generation"""
-        mock_exists.return_value = True
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("date", "expected_date"),
+        [
+            pytest.param("25", "«25» марта 2024 г.", id="custom-date"),
+            pytest.param("не число", "«15» марта 2024 г.", id="invalid-date"),
+            pytest.param("", "«15» марта 2024 г.", id="empty-date"),
+            pytest.param(None, "«15» марта 2024 г.", id="missing-date"),
+            pytest.param(" 25 ", "«15» марта 2024 г.", id="date-with-spaces"),
+        ],
+    )
+    @patch.object(Path, "exists", return_value=True)
+    @patch("src.utils.doctor_form.doctor_form_handler.Presentation")
+    @patch.object(DoctorFormGenerator, "_get_current_date", return_value=(15, "марта", 2024))
+    async def test_generate_preserves_date_rules_and_cleans_download(
+        self, mock_date, mock_presentation, mock_exists, mock_pptx, date, expected_date
+    ):
         mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
+        date_run = mock_pptx.slides[0].shapes[0].text_frame.paragraphs[0].runs[0]
+        date_run.text = "Дата"
 
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            doctor_2="Доктор Петров",
-            doctor_3="Доктор Сидоров",
-            doctor_4="Доктор Козлов",
-            patient_1="Пациент Иванов",
-            patient_2="Пациент Петров",
-            patient_3="Пациент Сидоров",
-            patient_4="Пациент Козлов",
-            date="20"
-        )
+        response = DoctorFormGenerator().generate(DoctorFormRequest(date=date))
 
-        assert isinstance(result, FileResponse)
-        assert result.filename == "Бланк Врача на печать.pptx"
-        assert result.media_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        assert isinstance(response, FileResponse)
+        assert response.filename == "Бланк Врача на печать.pptx"
+        assert response.media_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        assert date_run.text == expected_date
+        assert response.background is not None
+        await response.background()
+        assert not Path(response.path).is_file()
 
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    def test_doctor_form_handler_template_not_found(self, mock_exists, mock_request):
-        """Test missing template handling"""
-        mock_exists.return_value = False
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="Пациент Иванов",
-            date="15"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/doctor_form"
-        assert result.status_code == 303
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_custom_date(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test with custom date"""
-        mock_exists.return_value = True
+    @pytest.mark.asyncio
+    @patch.object(Path, "exists", return_value=True)
+    @patch("src.utils.doctor_form.doctor_form_handler.Presentation")
+    @patch.object(DoctorFormGenerator, "_get_current_date", return_value=(15, "марта", 2024))
+    async def test_generate_replaces_all_slots_on_every_slide(self, mock_date, mock_presentation, mock_exists, mock_pptx):
         mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="Пациент Иванов",
-            date="25"
+        first_paragraph = mock_pptx.slides[0].shapes[0].text_frame.paragraphs[0]
+        placeholders = ("Doctor_1", "Doctor_2", "Doctor_3", "Doctor_4", "Patient_1", "Patient_2", "Patient_3", "Patient_4")
+        runs = [MagicMock(text=placeholder) for placeholder in placeholders]
+        first_paragraph.runs = runs
+        second_run = MagicMock(text="Doctor_1")
+        second_slide = MagicMock()
+        second_slide.shapes = [MagicMock(has_text_frame=True)]
+        second_slide.shapes[0].text_frame.paragraphs = [MagicMock(runs=[second_run])]
+        mock_pptx.slides.append(second_slide)
+        data = DoctorFormRequest(
+            doctors=("doctor 1", "doctor 2", "doctor 3", "doctor 4"),
+            patients=("patient 1", "patient 2", "patient 3", "patient 4"),
         )
 
-        assert isinstance(result, (FileResponse, RedirectResponse))
+        response = DoctorFormGenerator().generate(data)
 
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_invalid_date(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test with invalid date"""
-        mock_exists.return_value = True
+        assert isinstance(response, FileResponse)
+        assert [run.text for run in runs] == [
+            "ВРАЧ: doctor 1",
+            "ВРАЧ: doctor 2",
+            "ВРАЧ: doctor 3",
+            "ВРАЧ: doctor 4",
+            "ПАЦИЕНТ: PATIENT 1",
+            "ПАЦИЕНТ: PATIENT 2",
+            "ПАЦИЕНТ: PATIENT 3",
+            "ПАЦИЕНТ: PATIENT 4",
+        ]
+        assert second_run.text == "ВРАЧ: doctor 1"
+        assert response.background is not None
+        await response.background()
+
+    @patch.object(Path, "exists", return_value=False)
+    @patch.object(DoctorFormGenerator, "_get_current_date", return_value=(15, "марта", 2024))
+    def test_generate_missing_template_returns_status_cookie(self, mock_date, mock_exists):
+        response = DoctorFormGenerator().generate(DoctorFormRequest())
+
+        assert isinstance(response, RedirectResponse)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/doctor_form"
+        cookie = SimpleCookie(response.headers["set-cookie"])["doctor_form_status"]
+        status = base64.b64decode(cookie.value).decode("utf-8")
+        assert status.startswith("Ошибка обработки файла: Файл шаблона не найден:")
+        assert cookie["max-age"] == "10"
+
+    @patch.object(Path, "exists", return_value=True)
+    @patch("src.utils.doctor_form.doctor_form_handler.Presentation")
+    @patch.object(DoctorFormGenerator, "_get_current_date", return_value=(15, "марта", 2024))
+    def test_generate_save_failure_cleans_temporary_file(self, mock_date, mock_presentation, mock_exists, mock_pptx):
         mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
+        mock_pptx.save.side_effect = ValueError("Presentation error")
 
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="Пациент Иванов",
-            date="не число"
-        )
+        response = DoctorFormGenerator().generate(DoctorFormRequest())
 
-        assert isinstance(result, (FileResponse, RedirectResponse))
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_empty_date(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test with empty date"""
-        mock_exists.return_value = True
-        mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="Пациент Иванов",
-            date=""
-        )
-
-        assert isinstance(result, (FileResponse, RedirectResponse))
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_none_values(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test with None values"""
-        mock_exists.return_value = True
-        mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1=None,
-            doctor_2=None,
-            doctor_3=None,
-            doctor_4=None,
-            patient_1=None,
-            patient_2=None,
-            patient_3=None,
-            patient_4=None,
-            date=None
-        )
-
-        assert isinstance(result, FileResponse)
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    @patch('src.utils.doctor_form.doctor_form_handler.get_current_date')
-    def test_doctor_form_handler_patient_name_uppercase(self, mock_get_date, mock_presentation, mock_exists, mock_request, mock_pptx):
-        """Test patient name uppercase conversion"""
-        mock_exists.return_value = True
-        mock_presentation.return_value = mock_pptx
-        mock_get_date.return_value = (15, "марта", 2024)
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="пациент иванов",
-            date="15"
-        )
-
-        assert isinstance(result, (FileResponse, RedirectResponse))
-
-    @patch('src.utils.doctor_form.doctor_form_handler.os.path.exists')
-    @patch('src.utils.doctor_form.doctor_form_handler.Presentation')
-    def test_doctor_form_handler_presentation_error(self, mock_exists, mock_presentation, mock_request):
-        """Test presentation error handling"""
-        mock_exists.return_value = True
-        mock_presentation.side_effect = Exception("Presentation error")
-
-        result = doctor_form_handler(
-            request=mock_request,
-            doctor_1="Доктор Иванов",
-            patient_1="Пациент Иванов",
-            date="15"
-        )
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers["location"] == "/doctor_form"
-        assert result.status_code == 303
+        assert isinstance(response, RedirectResponse)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/doctor_form"
+        cookie = SimpleCookie(response.headers["set-cookie"])["doctor_form_status"]
+        assert base64.b64decode(cookie.value).decode("utf-8") == "Ошибка обработки файла: Presentation error"
+        saved_path = Path(mock_pptx.save.call_args.args[0])
+        assert not saved_path.is_file()

@@ -1,25 +1,5 @@
-from .login import (
-    security,
-    config,
-    get_auth_dependency,
-    login_handler,
-    logout_handler,
-    refresh_token_handler,
-    jwt_decode_exception_handler,
-    check_auth_status,
-    REVOKED_TOKENS,
-    JWTDecodeError
-)
+from authx.exceptions import JWTDecodeError, MissingTokenError
 
-__all__ = [
-    'security',
-    'config',
-    'get_auth_dependency',
-    'login_handler',
-    'logout_handler',
-    'refresh_token_handler',
-    'jwt_decode_exception_handler',
-    'check_auth_status',
-    'REVOKED_TOKENS',
-    'JWTDecodeError',
-]
+from .login import AuthenticationService, Credentials, auth_service
+
+__all__ = ["AuthenticationService", "Credentials", "JWTDecodeError", "MissingTokenError", "auth_service"]

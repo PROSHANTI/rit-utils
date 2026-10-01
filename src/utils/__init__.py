@@ -1,3 +1,3 @@
-from .send_email.email_handler import send_email_handler
+from .send_email.email_handler import EmailHandler, EmailService, PaymentReport, SMTPSettings
 
-__all__ = ['send_email_handler']
+__all__ = ["EmailHandler", "EmailService", "PaymentReport", "SMTPSettings"]

@@ -19,20 +19,21 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-# Установка Poetry
-RUN pip install poetry
+# Закреплённая версия uv для сборки зависимостей
+COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /usr/local/bin/uv
 
 # Создание и настройка рабочей директории
 WORKDIR /app
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
+ENV UV_PYTHON_DOWNLOADS=never
 
 # Копирование файлов зависимостей
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml uv.lock ./
 
 # Установка зависимостей (без установки самого проекта)
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --no-root
+RUN uv sync --locked --no-dev --no-install-project --no-cache
 
 # Копирование исходного кода
 COPY . .
