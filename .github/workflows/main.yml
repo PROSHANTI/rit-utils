@@ -1,10 +1,9 @@
 name: RIT-UTILS
 
 on:
-  push:
-    branches: [ main, test ]
-  pull_request:
-    branches: [ main, test ]
+  # The legacy main/test servers are paused. Manual runs execute CI only;
+  # restore the previous triggers when those deployment targets return.
+  workflow_dispatch:
 
 jobs:
   tests:
