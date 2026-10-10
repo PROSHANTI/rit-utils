@@ -1,0 +1,52 @@
+name: rit-utils-pi-updater
+
+services:
+  updater:
+    image: docker:29.9.0-cli@sha256:1a4c7cb63513f349bdad01fcc6e0f3f2f67d37b9da86f14dc0d4a0942eecda00
+    platform: linux/arm64
+    container_name: rit-utils-pi-updater
+    restart: unless-stopped
+    init: true
+    entrypoint: [/bin/sh, /controller/updater.sh]
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DEPLOY_DIR: /home/umbrel/rit-utils
+      PROJECT: rit-utils-pi
+      SERVICE: app
+      APP_CONTAINER: rit-utils-pi-app
+      IMAGE_REPOSITORY: proshanti/rit-utils
+      CHANNEL: pi
+      POLL_SECONDS: '300'
+      WAIT_SECONDS: '180'
+      STABLE_SECONDS: '20'
+      STATE_DIR: /state
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /home/umbrel/rit-utils
+        target: /home/umbrel/rit-utils
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./updater.sh
+        target: /controller/updater.sh
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: updater_state
+        target: /state
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '2'
+
+volumes:
+  updater_state:
+    name: rit-utils-pi-updater-state
