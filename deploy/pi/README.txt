@@ -2,17 +2,22 @@ RIT Utils: branch pi, native ARM64 CI, outgoing Pi updates
 
 Branch pi starts from the tested production commit
 e18ba71c1ad606a0809768f7f6ff7492e1e74471 and builds native ARM64 images for
-Raspberry Pi. Existing main/test CI stays unchanged.
+Raspberry Pi. Automatic legacy main/test workflows are paused while those
+servers are unavailable: main.yml accepts workflow_dispatch only. Manual runs
+execute CI without publishing or SSH deployment. Restore its push/pull_request
+triggers for main/test when those targets return; Pi uses a separate pi.yml.
 
 Repository file mapping
   pi.yml                -> .github/workflows/pi.yml
   arm64_pdf_smoke.py     -> .github/scripts/arm64_pdf_smoke.py
+  notify_pi.py           -> .github/scripts/notify_pi.py
+  test_notify_pi.py      -> .github/scripts/test_notify_pi.py
   updater.sh            -> deploy/pi/updater.sh
   compose.updater.yml   -> deploy/pi/compose.updater.yml
   test_updater.py        -> deploy/pi/test_updater.py
   README.txt             -> deploy/pi/README.txt
-Only these six files belong to this setup. Local validation caches and source
-archives must not be copied into Git or onto Pi.
+Local validation caches and source archives must not be copied into Git or
+onto Pi.
 
 Development flow
   Work in feature branches and open PRs with base pi. PRs run checks without
@@ -22,6 +27,15 @@ Development flow
   A rerun verifies/reuses an existing commit image; it never overwrites it.
   Only the current pi branch head moves proshanti/rit-utils:pi. No latest/main/
   test/buildcache tags are changed. Main changes enter pi through a manual PR.
+
+Telegram notifications
+  Pi push builds reuse TELEGRAM_TO and TELEGRAM_TOKEN from the existing repo
+  secrets. A successful notification requires the Pi channel push to finish;
+  stale commits skipped by the publish step send no success notification.
+  The message confirms ARM64 tests and publication, with the commit description
+  and Actions link. Actual Pi deployment happens later via its controller.
+  Failed Pi push builds send an error notification with the Actions link.
+  Pull requests and cancelled jobs do not send notifications or publish images.
 
 The public repository uses the standard ubuntu-24.04-arm runner: native ARM64,
 4 CPU and 16 GB RAM, currently free for public repositories. Private repository

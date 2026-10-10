@@ -18,6 +18,8 @@ jobs:
     name: Test and build native ARM64
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
+    outputs:
+      channel_updated: ${{ steps.publish.outputs.channel_updated }}
     env:
       IMAGE_REPOSITORY: proshanti/rit-utils
       LOCAL_IMAGE: rit-utils:ci-${{ github.sha }}
@@ -48,7 +50,7 @@ jobs:
           uv run --locked black --check .
           uv run --locked ruff check .
           uv run --locked mypy
-          uv run --locked mypy .github/scripts/arm64_pdf_smoke.py deploy/pi/test_updater.py
+          uv run --locked mypy .github/scripts/arm64_pdf_smoke.py .github/scripts/notify_pi.py .github/scripts/test_notify_pi.py deploy/pi/test_updater.py
 
       - name: Unit tests
         env:
@@ -63,6 +65,7 @@ jobs:
         run: |
           uv run --locked pytest
           uv run --locked python deploy/pi/test_updater.py
+          uv run --locked python .github/scripts/test_notify_pi.py
 
       - name: Build the ARM64 runtime image
         run: |
@@ -89,6 +92,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Publish the tested image and move the Pi channel
+        id: publish
         if: github.ref == 'refs/heads/pi' && github.event_name != 'pull_request'
         run: |
           set -euo pipefail
@@ -117,4 +121,27 @@ jobs:
           fi
           docker tag "$immutable" "$IMAGE_REPOSITORY:pi"
           docker push "$IMAGE_REPOSITORY:pi"
+          echo 'channel_updated=true' >> "$GITHUB_OUTPUT"
           printf 'Published `%s`; Pi checks the channel every five minutes.\n' "$immutable" >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Send Telegram notification (Pi)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: arm64
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/pi' &&
+      (needs.arm64.result == 'failure' ||
+       (needs.arm64.result == 'success' && needs.arm64.outputs.channel_updated == 'true'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Send the Pi pipeline result
+        env:
+          TELEGRAM_TO: ${{ secrets.TELEGRAM_TO }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          PI_CI_RESULT: ${{ needs.arm64.result }}
+        run: python3 .github/scripts/notify_pi.py
