@@ -1,0 +1,120 @@
+name: RIT Utils Pi
+
+on:
+  push:
+    branches: [pi]
+  pull_request:
+    branches: [pi]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rit-utils-pi-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'publish' }}
+  cancel-in-progress: false
+
+jobs:
+  arm64:
+    name: Test and build native ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    env:
+      IMAGE_REPOSITORY: proshanti/rit-utils
+      LOCAL_IMAGE: rit-utils:ci-${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.12.19'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Quality checks
+        run: |
+          uv run --locked black --check .
+          uv run --locked ruff check .
+          uv run --locked mypy
+          uv run --locked mypy .github/scripts/arm64_pdf_smoke.py deploy/pi/test_updater.py
+
+      - name: Unit tests
+        env:
+          LOGIN: test_user
+          PASSWORD: test_password
+          JWT_SECRET_KEY: test-secret-key-for-ci
+          SEND_FROM: test@example.com
+          EMAIL_PASS: test_password
+          ADDR_TO: test@example.com
+          BCC_TO: test@example.com
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          uv run --locked pytest
+          uv run --locked python deploy/pi/test_updater.py
+
+      - name: Build the ARM64 runtime image
+        run: |
+          test "$(uname -m)" = aarch64
+          docker buildx create --name pi-ci --driver docker-container --use
+          docker buildx build --platform linux/arm64 --load \
+            --tag "$LOCAL_IMAGE" \
+            --label "org.opencontainers.image.source=https://github.com/PROSHANTI/rit-utils" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.ref.name=pi" \
+            --file Dockerfile .
+
+      - name: Check native runtime and real PDF conversion
+        run: |
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$LOCAL_IMAGE")" = linux/arm64
+          docker run --rm --network none --entrypoint python -i "$LOCAL_IMAGE" - \
+            < .github/scripts/arm64_pdf_smoke.py
+
+      - name: Login to existing DockerHub repository
+        if: github.ref == 'refs/heads/pi' && github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Publish the tested image and move the Pi channel
+        if: github.ref == 'refs/heads/pi' && github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          immutable="$IMAGE_REPOSITORY:pi-$GITHUB_SHA"
+          # Publish each commit tag once. A rerun verifies and reuses the
+          # existing image rather than replacing its contents with a rebuild.
+          manifest_error="$RUNNER_TEMP/pi-manifest.error"
+          if docker manifest inspect "$immutable" >/dev/null 2>"$manifest_error"; then
+            docker pull "$immutable"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$immutable")" = linux/arm64
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$immutable")" = "$GITHUB_SHA"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$immutable")" = https://github.com/PROSHANTI/rit-utils
+            docker run --rm --network none --entrypoint python -i "$immutable" - \
+              < .github/scripts/arm64_pdf_smoke.py
+          elif grep -Eq 'no such manifest|manifest unknown' "$manifest_error"; then
+            docker tag "$LOCAL_IMAGE" "$immutable"
+            docker push "$immutable"
+          else
+            echo "Cannot establish the commit tag state; publication stopped."
+            exit 1
+          fi
+          head_sha="$(git ls-remote origin refs/heads/pi | cut -f1)"
+          if [ "$head_sha" != "$GITHUB_SHA" ]; then
+            echo "A newer Pi commit exists; the channel remains unchanged."
+            exit 0
+          fi
+          docker tag "$immutable" "$IMAGE_REPOSITORY:pi"
+          docker push "$IMAGE_REPOSITORY:pi"
+          printf 'Published `%s`; Pi checks the channel every five minutes.\n' "$immutable" >> "$GITHUB_STEP_SUMMARY"
