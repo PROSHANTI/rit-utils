@@ -69,5 +69,6 @@ screenshots/
 node_modules/
 
 # Temporary files
+data/
 tmp/
 temp/

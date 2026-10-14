@@ -7,6 +7,7 @@ __pycache__/
 *.so
 
 # Files
+data/
 src/utils/send_email/email_templates.py
 src/utils/gen_cert/Сертификат_шаблон.pptx
 src/utils/doctor_form/Бланк врача на печать.pptx

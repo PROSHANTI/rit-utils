@@ -1,0 +1,8 @@
+# Merge this service configuration into Pi's persistent compose.yml before
+# enabling automatic image updates; the controller reads that base file.
+services:
+  app:
+    environment:
+      ONE_ALMA_DB_PATH: /app/data/one_alma.sqlite3
+    volumes:
+      - ./data:/app/data

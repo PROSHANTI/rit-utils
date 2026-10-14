@@ -133,6 +133,12 @@ body {
     color: white;
 }
 
+.square .utility-icon {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 20px;
+}
+
 .square .desc {
     font-size: 1rem;
     font-weight: normal;

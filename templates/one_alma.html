@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Учет OneAlma — RIT-UTILS</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/css/style_utils.css">
+    <link rel="stylesheet" href="/static/css/one_alma.css">
+    <script src="/static/one_alma.js" defer></script>
+</head>
+<body class="inventory-page">
+    <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
+        <header class="inventory-heading">
+            <img src="/static/images/one_alma.svg" width="52" height="52" alt="">
+            <div class="logo">
+                <span>Учет OneAlma</span>
+                <p>Учет продажи товаров</p>
+            </div>
+        </header>
+        <section class="inventory-stats" aria-label="Статистика товаров">
+            <div class="stat-card"><p>Общее количество всех товаров</p><strong id="total-count">{{ inventory.total }}</strong><span>штук</span></div>
+            <div class="stat-card"><p>Продано товаров</p><strong id="sold-count">{{ inventory.sold }}</strong><span>штук</span></div>
+            <div class="stat-card"><p>В наличии всего</p><strong id="available-count">{{ inventory.available }}</strong><span>штук</span></div>
+        </section>
+        <section class="inventory-panel inventory-finance" aria-labelledby="finance-heading">
+            <h2 id="finance-heading">Денежные итоги</h2>
+            <p class="inventory-help">Стоимость товаров по ценам исходной таблицы.</p>
+            <div class="inventory-scroll" tabindex="0" aria-label="Денежные итоги">
+                <table class="finance-table">
+                    <thead><tr><th scope="col">База расчёта</th><th scope="col">Все товары, ₽</th><th scope="col">Продано, ₽</th><th scope="col">В наличии, ₽</th></tr></thead>
+                    <tbody>
+                        {% for valuation in inventory.valuations %}
+                        <tr data-valuation-index="{{ loop.index0 }}">
+                            <th scope="row">{{ valuation.label }}</th>
+                            {% for amount in valuation.amounts %}
+                            <td><span class="valuation-amount">{{ amount }}</span><small class="unpriced-note">{% if valuation.unpriced[loop.index0] %}Без цены: {{ valuation.unpriced[loop.index0] }} шт.{% endif %}</small></td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <div class="inventory-actions">
+            <a class="download-pdf" href="/one_alma/pdf" download="one_alma.pdf">Скачать PDF</a>
+            <button type="button" id="add-product">Добавить товар</button>
+            <button type="button" id="import-products">Импорт товаров</button>
+        </div>
+        <section class="inventory-panel" aria-label="Товары">
+            <div class="table-toolbar">
+                <span id="selection-count">Выбрано: 0</span>
+                <button type="button" id="delete-selected" class="secondary-button" disabled>Удалить выбранные</button>
+            </div>
+            <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+            <div class="inventory-scroll" tabindex="0" aria-label="Таблица товаров, прокручивается горизонтально">
+                <table class="inventory-table">
+                    <caption class="visually-hidden">Товары OneAlma: цены указаны за одну штуку</caption>
+                    <thead><tr>
+                        <th scope="col" class="selection-cell"><input type="checkbox" id="select-all" aria-label="Выбрать все товары"></th>
+                        {% for column in columns %}<th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="{{ loop.index0 }}">{{ column }} <span aria-hidden="true">↕</span></button></th>{% endfor %}
+                        <th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="8">Продано <span aria-hidden="true">↕</span></button></th>
+                        <th scope="col">Действия</th>
+                    </tr></thead>
+                    <tbody>
+                        {% for product in inventory.products %}
+                        <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" class="{% if product.available == 0 %}sold-out{% endif %}">
+                            <td class="selection-cell"><input type="checkbox" class="select-product" value="{{ product.id }}" aria-label="Выбрать {{ product.cells[2] }}"></td>
+                            {% for cell in product.cells %}<td>{{ cell }}</td>{% endfor %}
+                            <td class="sale-cell">
+                                <div class="unit-controls">
+                                    {% for unit in product.units %}
+                                    <label class="unit-label">
+                                        <input type="checkbox" data-unit-id="{{ unit.id }}" {% if unit.sold %}checked{% endif %}
+                                            aria-label="{{ product.cells[2] }}, штука {{ unit.number }}: продано">
+                                        <span>Штука {{ unit.number }}</span>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                                <span class="row-sold">Продано: {{ product.sold_count }} из {{ product.units | length }}</span>
+                                <span class="row-available">В наличии: {{ product.available }}</span>
+                            </td>
+                            <td class="row-actions">
+                                <button type="button" class="icon-button edit-product" title="Редактировать товар" aria-label="Редактировать {{ product.cells[2] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6 12-12Zm-1 2 5 5M4 15l5 5"/></svg></button>
+                                <button type="button" class="icon-button delete-product" title="Удалить товар" aria-label="Удалить {{ product.cells[2] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V3h6v4M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg></button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="inventory-note">Цены за 1 штуку. Цена по ЦБ РФ — на 27.05.2026. Данные: прайс Emansi.</p>
+        </section>
+        <dialog id="product-dialog" class="inventory-dialog">
+            <form id="product-form">
+                <div class="dialog-heading"><h2 id="product-dialog-title">Добавить товар</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
+                <div class="product-form-grid">
+                    <div><label for="product-position">№</label><input id="product-position" name="position" type="number" min="1" max="999999" value="{{ inventory.next_position }}" placeholder="26" required></div>
+                    <div><label for="product-article">Артикул</label><input id="product-article" name="article" maxlength="64" placeholder="8986" required></div>
+                    <div class="wide-field"><label for="product-name">Наименование препарата</label><input id="product-name" name="name" maxlength="300" placeholder="Крем для увлажнения кожи" required></div>
+                    <div><label for="product-volume">Объём</label><input id="product-volume" name="volume" maxlength="64" placeholder="150 мл" required></div>
+                    <div><label for="product-expiry">Годен до</label><input id="product-expiry" name="expiry" inputmode="numeric" placeholder="09.2028" maxlength="7" pattern="(0[1-9]|1[0-2])\.[0-9]{4}" required></div>
+                    <div><label for="product-cb">Цена по ЦБ РФ, ₽</label><input id="product-cb" name="central_bank_price" inputmode="decimal" maxlength="32" placeholder="1343,43"></div>
+                    <div><label for="product-wholesale">Оптовая цена Emansi, ₽</label><input id="product-wholesale" name="wholesale_price" inputmode="decimal" maxlength="32" placeholder="5429,52"></div>
+                    <div><label for="product-market">Средняя цена в магазинах, ₽</label><input id="product-market" name="market_price" inputmode="decimal" maxlength="32" placeholder="8920,00"></div>
+                    <div><label for="product-quantity">Количество, шт.</label><input id="product-quantity" name="quantity" type="number" min="1" max="1000" value="2" placeholder="2" required></div>
+                </div>
+                <p class="dialog-status" role="status"></p>
+                <button type="submit">Сохранить товар</button>
+            </form>
+        </dialog>
+        <dialog id="import-dialog" class="inventory-dialog">
+            <form id="import-form">
+                <div class="dialog-heading"><h2>Импорт товаров</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
+                <p class="import-help">Файл <strong>.xlsx</strong>, первый лист. Заголовки:</p>
+                <p class="import-columns">№ · Артикул · Наименование · Объём · Годен до · Цена ЦБ · Цена опт · Цена магазина · Количество</p>
+                <ul class="import-help">
+                    <li>Каждая следующая строка — один товар. Номера позиций уникальны.</li>
+                    <li>Годен до: <strong>09.2028</strong>. Цены: <strong>1343,43</strong> или <strong>1343.43</strong>, без ₽.</li>
+                    <li>Пустая цена означает, что цена неизвестна. Артикулы с начальным нулём храните как текст.</li>
+                    <li>Количество — целое число. Без этой колонки добавится по 2 штуки каждой позиции.</li>
+                    <li>Поддерживается и исходная таблица Emansi с её заголовками. При ошибке импорт целиком отменяется.</li>
+                </ul>
+                <label for="import-file">Excel с товарами, до 5 МБ</label>
+                <input id="import-file" name="file" type="file" accept=".xlsx" required>
+                <p class="dialog-status" role="status"></p>
+                <button type="submit">Импортировать</button>
+            </form>
+        </dialog>
+        <noscript><p class="error-message">Включите JavaScript, чтобы отмечать продажи.</p></noscript>
+    </main>
+    {% include "footer.html" %}
+</body>
+</html>

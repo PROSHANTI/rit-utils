@@ -2,13 +2,15 @@ import base64
 import logging
 from collections.abc import Callable
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.templating import Jinja2Templates
 
 from src.auth import AuthenticationService
 from src.utils.doctor_form.doctor_form_handler import DoctorFormGenerator, DoctorFormRequest
 from src.utils.gen_cert.gen_cert_handler import CertificateGenerator, CertificateRequest
+from src.utils.one_alma.models import NewProduct
+from src.utils.one_alma.one_alma_handler import OneAlmaHandler
 from src.utils.remove_bg.remove_bg_handler import RemoveBackgroundHandler
 from src.utils.send_email.email_handler import EmailHandler
 
@@ -22,6 +24,7 @@ class ApplicationRouter:
         self.certificates = CertificateGenerator()
         self.doctor_forms = DoctorFormGenerator()
         self.images = RemoveBackgroundHandler()
+        self.one_alma = OneAlmaHandler()
         self.templates = Jinja2Templates(directory="templates")
         self.dependencies = [auth.dependency()]
         self.router = APIRouter()
@@ -119,6 +122,78 @@ class ApplicationRouter:
     ) -> Response:
         return self.images.handle(background_tasks=background_tasks, file=file, color=color)
 
+    def one_alma_page(self, request: Request) -> Response:
+        return self.one_alma.page(request)
+
+    def one_alma_sale(self, request: Request, unit_id: int, sold: bool = Form(...), csrf_token: str = Form(...)) -> Response:
+        return self.one_alma.set_sold(request, unit_id, sold, csrf_token)
+
+    def one_alma_add_product(
+        self,
+        request: Request,
+        position: int = Form(..., ge=1, le=999999),
+        article: str = Form(..., min_length=1, max_length=64),
+        name: str = Form(..., min_length=1, max_length=300),
+        volume: str = Form(..., min_length=1, max_length=64),
+        expiry: str = Form(..., max_length=7),
+        central_bank_price: str = Form("", max_length=32),
+        wholesale_price: str = Form("", max_length=32),
+        market_price: str = Form("", max_length=32),
+        quantity: int = Form(2, ge=1, le=1000),
+        csrf_token: str = Form(...),
+    ) -> Response:
+        product = NewProduct(
+            position=position,
+            article=article,
+            name=name,
+            volume=volume,
+            expiry=expiry,
+            central_bank_price=central_bank_price,
+            wholesale_price=wholesale_price,
+            market_price=market_price,
+            quantity=quantity,
+        )
+        return self.one_alma.add_product(request, product, csrf_token)
+
+    def one_alma_pdf(self, sort: int = Query(0, ge=0, le=8), descending: bool = Query(False)) -> Response:
+        return self.one_alma.download_pdf(sort, descending)
+
+    def one_alma_update_product(
+        self,
+        request: Request,
+        product_id: int,
+        position: int = Form(..., ge=1, le=999999),
+        article: str = Form(..., min_length=1, max_length=64),
+        name: str = Form(..., min_length=1, max_length=300),
+        volume: str = Form(..., min_length=1, max_length=64),
+        expiry: str = Form(..., max_length=7),
+        central_bank_price: str = Form("", max_length=32),
+        wholesale_price: str = Form("", max_length=32),
+        market_price: str = Form("", max_length=32),
+        quantity: int = Form(2, ge=1, le=1000),
+        csrf_token: str = Form(...),
+    ) -> Response:
+        product = NewProduct(
+            position=position,
+            article=article,
+            name=name,
+            volume=volume,
+            expiry=expiry,
+            central_bank_price=central_bank_price,
+            wholesale_price=wholesale_price,
+            market_price=market_price,
+            quantity=quantity,
+        )
+        return self.one_alma.update_product(request, product_id, product, csrf_token)
+
+    def one_alma_delete_products(
+        self, request: Request, product_ids: list[int] = Form(...), csrf_token: str = Form(...)
+    ) -> Response:
+        return self.one_alma.delete_products(request, product_ids, csrf_token)
+
+    def one_alma_import(self, request: Request, file: UploadFile = File(...), csrf_token: str = Form(...)) -> Response:
+        return self.one_alma.import_products(request, file, csrf_token)
+
     def _register_routes(self) -> None:
         routes: list[tuple[str, Callable[..., Response], list[str], bool, str, list[str]]] = [
             ("/login", self.login, ["POST"], False, "Авторизация", ["Авторизация"]),
@@ -162,6 +237,13 @@ class ApplicationRouter:
             ),
             ("/remove_bg", self.remove_bg_page, ["GET"], True, "Страница удаления фона с изображений", ["Удаление фона"]),
             ("/remove_bg", self.remove_bg_endpoint, ["POST"], True, "Удалить фон с изображения", ["Удаление фона"]),
+            ("/one_alma", self.one_alma_page, ["GET"], True, "Учет OneAlma", ["OneAlma"]),
+            ("/one_alma/units/{unit_id}", self.one_alma_sale, ["POST"], True, "Отметить продажу товара", ["OneAlma"]),
+            ("/one_alma/pdf", self.one_alma_pdf, ["GET"], True, "Скачать учёт товаров в PDF", ["OneAlma"]),
+            ("/one_alma/products", self.one_alma_add_product, ["POST"], True, "Добавить товар", ["OneAlma"]),
+            ("/one_alma/products/{product_id}", self.one_alma_update_product, ["PUT"], True, "Изменить товар", ["OneAlma"]),
+            ("/one_alma/products", self.one_alma_delete_products, ["DELETE"], True, "Удалить товары", ["OneAlma"]),
+            ("/one_alma/import", self.one_alma_import, ["POST"], True, "Импорт товаров из Excel", ["OneAlma"]),
         ]
         for path, endpoint, methods, protected, summary, tags in routes:
             self.router.add_api_route(
