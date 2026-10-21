@@ -43,12 +43,18 @@ class InventoryPdfExporter:
         cb_summary = f"Стоимость по цене ЦБ РФ, ₽. Всего: {cb.amounts[0]}. Продано: {cb.amounts[1]}. В наличии: {cb.amounts[2]}."
         if cb.unpriced_total:
             cb_summary += f" Без цены: {cb.unpriced_total} шт. (продано {cb.unpriced_sold}, в наличии {cb.unpriced_available})."
-        data = [[self._paragraph(column, header) for column in (*COLUMNS, "Продано")]]
+        data = [[self._paragraph(column, header) for column in (*COLUMNS, "Витрина, шт.", "Продано")]]
         for product in inventory.products:
             sold = f"{product.sold_count} из {len(product.units)}\nВ наличии: {product.available}"
-            data.append([self._paragraph(cell, body) for cell in product.cells] + [self._paragraph(sold, sold_style)])
+            showcase = str(product.showcase_quantity) if product.showcase_quantity else "—"
+            data.append(
+                [self._paragraph(cell, body) for cell in product.cells]
+                + [self._paragraph(showcase, sold_style), self._paragraph(sold, sold_style)]
+            )
         table = Table(
-            data, colWidths=[9 * mm, 18 * mm, 74 * mm, 18 * mm, 20 * mm, 34 * mm, 32 * mm, 38 * mm, 30 * mm], repeatRows=1
+            data,
+            colWidths=[9 * mm, 17 * mm, 61 * mm, 17 * mm, 19 * mm, 29 * mm, 29 * mm, 34 * mm, 20 * mm, 28 * mm],
+            repeatRows=1,
         )
         table.setStyle(
             TableStyle(
@@ -72,6 +78,7 @@ class InventoryPdfExporter:
                 Paragraph(
                     f"Всего товаров: {inventory.total}. Продано: {inventory.sold}. В наличии: {inventory.available}.", subtitle
                 ),
+                Paragraph(f"На витрине: {inventory.showcase_quantity} шт. Входит в количество в наличии.", subtitle),
                 Spacer(1, 5 * mm),
                 Paragraph(cb_summary, subtitle),
                 Spacer(1, 5 * mm),

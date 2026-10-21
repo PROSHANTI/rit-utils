@@ -128,6 +128,16 @@ class ApplicationRouter:
     def one_alma_sale(self, request: Request, unit_id: int, sold: bool = Form(...), csrf_token: str = Form(...)) -> Response:
         return self.one_alma.set_sold(request, unit_id, sold, csrf_token)
 
+    def one_alma_sold_count(
+        self, request: Request, product_id: int, quantity: int = Form(..., ge=0, le=1000), csrf_token: str = Form(...)
+    ) -> Response:
+        return self.one_alma.set_product_count(request, product_id, quantity, csrf_token)
+
+    def one_alma_showcase(
+        self, request: Request, product_id: int, quantity: int = Form(..., ge=0, le=1000), csrf_token: str = Form(...)
+    ) -> Response:
+        return self.one_alma.set_product_count(request, product_id, quantity, csrf_token, showcase=True)
+
     def one_alma_add_product(
         self,
         request: Request,
@@ -155,7 +165,7 @@ class ApplicationRouter:
         )
         return self.one_alma.add_product(request, product, csrf_token)
 
-    def one_alma_pdf(self, sort: int = Query(0, ge=0, le=8), descending: bool = Query(False)) -> Response:
+    def one_alma_pdf(self, sort: int = Query(0, ge=0, le=9), descending: bool = Query(False)) -> Response:
         return self.one_alma.download_pdf(sort, descending)
 
     def one_alma_update_product(
@@ -239,6 +249,15 @@ class ApplicationRouter:
             ("/remove_bg", self.remove_bg_endpoint, ["POST"], True, "Удалить фон с изображения", ["Удаление фона"]),
             ("/one_alma", self.one_alma_page, ["GET"], True, "Учет OneAlma", ["OneAlma"]),
             ("/one_alma/units/{unit_id}", self.one_alma_sale, ["POST"], True, "Отметить продажу товара", ["OneAlma"]),
+            ("/one_alma/products/{product_id}/sold", self.one_alma_sold_count, ["POST"], True, "Количество продаж", ["OneAlma"]),
+            (
+                "/one_alma/products/{product_id}/showcase",
+                self.one_alma_showcase,
+                ["POST"],
+                True,
+                "Количество на витрине",
+                ["OneAlma"],
+            ),
             ("/one_alma/pdf", self.one_alma_pdf, ["GET"], True, "Скачать учёт товаров в PDF", ["OneAlma"]),
             ("/one_alma/products", self.one_alma_add_product, ["POST"], True, "Добавить товар", ["OneAlma"]),
             ("/one_alma/products/{product_id}", self.one_alma_update_product, ["PUT"], True, "Изменить товар", ["OneAlma"]),

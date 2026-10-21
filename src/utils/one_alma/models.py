@@ -72,6 +72,7 @@ class Product:
     id: int
     cells: tuple[str, ...]
     units: tuple[ProductUnit, ...]
+    showcase_quantity: int = 0
 
     @property
     def sold_count(self) -> int:
@@ -106,6 +107,14 @@ class Inventory:
     products: tuple[Product, ...]
 
     @property
+    def showcase_quantity(self) -> int:
+        return sum(product.showcase_quantity for product in self.products)
+
+    @property
+    def showcased_products(self) -> int:
+        return sum(product.showcase_quantity > 0 for product in self.products)
+
+    @property
     def total(self) -> int:
         return sum(len(product.units) for product in self.products)
 
@@ -122,9 +131,11 @@ class Inventory:
         return max((int(product.cells[0]) for product in self.products), default=0) + 1
 
     def sorted_by(self, column: int, descending: bool = False) -> "Inventory":
-        if not 0 <= column <= 8:
+        if not 0 <= column <= 9:
             raise ValueError("Неизвестная колонка сортировки")
-        if column == 8:
+        if column == 9:
+            ordered = sorted(self.products, key=lambda product: product.showcase_quantity, reverse=descending)
+        elif column == 8:
             ordered = sorted(self.products, key=lambda product: product.sold_count, reverse=descending)
         elif column in (0, 5, 6, 7):
             priced = [product for product in self.products if product.cells[column] not in ("", "—")]

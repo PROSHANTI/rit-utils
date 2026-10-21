@@ -40,11 +40,13 @@ def product_data(csrf):
     )
 
 
-def excel_file(*rows):
+def excel_file(*rows, headers=None):
     workbook = Workbook()
     sheet = workbook.active
     assert sheet is not None
-    sheet.append(["№", "Артикул", "Наименование", "Объём", "Годен до", "Цена ЦБ", "Цена опт", "Цена магазина", "Количество"])
+    sheet.append(
+        headers or ["№", "Артикул", "Наименование", "Объём", "Годен до", "Цена ЦБ", "Цена опт", "Цена магазина", "Количество"]
+    )
     for row in rows:
         sheet.append(row)
     output = BytesIO()
@@ -61,14 +63,18 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert "Учет OneAlma" in home and "Учет продажи товаров" in home
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert html.count("data-unit-id=") == 50
-    assert "Штука 1" in html and "Штука 2" in html
-    assert "Продано: 0 из 2" in html
+    assert html.count('data-count-kind="sold"') == html.count('data-count-kind="showcase"') == 25
+    assert "Штука 1" not in html and "data-unit-id=" not in html
+    assert '<span class="count-text">0 из 2</span>' in html
+    assert "+ Выставить" in html and 'id="count-plus"' in html and 'id="count-minus"' in html
+    assert "Денежные итоги" not in html and "Поле необязательное" not in html and "из оставшихся штук" not in html
+    assert "Стоимость товаров по ценам исходной таблицы." not in html
+    assert "Выставлено ·" not in html and "Не выставлено" not in html
     assert "Каждый чекбокс —" not in html and "Изменения сохраняются автоматически." not in html
-    assert html.index("Денежные итоги") < html.index("Скачать PDF") < html.index('class="inventory-table"')
+    assert html.index("Расчёт") < html.index("Скачать PDF") < html.index('class="inventory-table"')
     assert "Импорт товаров" in html and "Удалить выбранные" in html
     assert "Без цены: 4 шт." in html
-    assert len(re.findall("data-sort-column=", html)) == 9
+    assert len(re.findall("data-sort-column=", html)) == 10
     assert 'data-sort-column="5">Цена ЦБ, ₽ <span' in html
     assert "Цена по ЦБ РФ на 27.05, ₽" not in html
 
@@ -87,7 +93,7 @@ def test_sale_endpoint_counts_individual_units(authenticated_client, inventory_r
     assert responses[-1].json()["available"] == 48 + available
     assert responses[-1].json()["products"][0]["available"] == available
     assert responses[0].json()["valuations"][0]["amounts"][1] == "1 343,43"
-    assert f"Продано: {len(indices)} из 2" in page
+    assert f'<span class="count-text">{len(indices)} из 2</span>' in page
 
 
 def test_create_endpoint_adds_product_and_renders_fields(authenticated_client, inventory_repository, csrf):
@@ -158,6 +164,8 @@ def test_csrf_rejects_mutations_without_changing_database(authenticated_client, 
     file = excel_file([1, "0001", "Крем", "50 мл", "09.2028", 100, 200, 300, 4])
 
     responses = [
+        authenticated_client.post("/one_alma/products/1/sold", data={"quantity": "1", "csrf_token": "wrong"}),
+        authenticated_client.post("/one_alma/products/1/showcase", data={"quantity": "1", "csrf_token": "wrong"}),
         authenticated_client.post("/one_alma/units/1", data={"sold": "true", "csrf_token": "wrong"}),
         authenticated_client.post("/one_alma/products", data=product_data("wrong")),
         authenticated_client.request("DELETE", "/one_alma/products", data={"product_ids": [1], "csrf_token": "wrong"}),
@@ -195,6 +203,100 @@ def test_pdf_rejects_invalid_sort_column(authenticated_client, inventory_reposit
     response = authenticated_client.get("/one_alma/pdf?sort=99")
 
     assert response.status_code == 422
+
+
+def test_showcase_endpoint_updates_only_manual_display_count(authenticated_client, inventory_repository, csrf):
+    before = inventory_repository.snapshot()
+
+    response = authenticated_client.post("/one_alma/products/1/showcase", data={"quantity": "1", "csrf_token": csrf})
+    page = authenticated_client.get("/one_alma")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["showcase_quantity"] == response.json()["showcased_products"] == 1
+    assert response.json()["products"][0]["showcase_quantity"] == 1
+    assert "✓ 1 шт." in page.text
+    assert inventory_repository.snapshot().valuations == before.valuations
+    assert inventory_repository.snapshot().products[0].units == before.products[0].units
+
+
+def test_sold_count_endpoint_preserves_history_and_returns_updated_snapshot(authenticated_client, inventory_repository, csrf):
+    inventory_repository.set_showcase_quantity(1, 2)
+
+    response = authenticated_client.post("/one_alma/products/1/sold", data={"quantity": "2", "csrf_token": csrf})
+    page = authenticated_client.get("/one_alma")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert (data["total"], data["sold"], data["available"], data["showcase_quantity"]) == (50, 2, 48, 0)
+    assert len(data["products"]) == 25
+    assert all(unit["sold"] for unit in data["products"][0]["units"])
+    assert '<span class="count-text">2 из 2</span>' in page.text
+    assert data["valuations"][0]["amounts"][1] == "2 686,86"
+
+
+@pytest.mark.parametrize("kind", ["showcase", "sold"])
+@pytest.mark.parametrize("quantity", ["-1", "3", "1.5", "wrong", "1001"])
+def test_invalid_product_count_is_rejected_atomically(authenticated_client, inventory_repository, csrf, kind, quantity):
+    before = inventory_repository.snapshot()
+
+    response = authenticated_client.post(f"/one_alma/products/1/{kind}", data={"quantity": quantity, "csrf_token": csrf})
+
+    assert response.status_code == 422
+    assert inventory_repository.snapshot() == before
+
+
+@pytest.mark.parametrize("kind", ["showcase", "sold"])
+def test_missing_product_count_returns_not_found(authenticated_client, inventory_repository, csrf, kind):
+    before = inventory_repository.snapshot()
+
+    response = authenticated_client.post(f"/one_alma/products/9999/{kind}", data={"quantity": "0", "csrf_token": csrf})
+
+    assert response.status_code == 404
+    assert inventory_repository.snapshot() == before
+
+
+def test_excel_extra_showcase_column_is_ignored_and_manual_value_survives_reimport(
+    authenticated_client, inventory_repository, csrf
+):
+    inventory_repository.set_showcase_quantity(1, 1)
+    headers = [
+        "№",
+        "Артикул",
+        "Наименование",
+        "Объём",
+        "Годен до",
+        "Цена ЦБ",
+        "Цена опт",
+        "Цена магазина",
+        "Количество",
+        "Витрина",
+    ]
+    file = excel_file(
+        [1, "0001", "Обновлённый крем", "50 мл", "09.2028", 100, None, None, 3, 99],
+        [26, "0002", "Новый крем", "50 мл", "09.2028", 200, None, None, 4, "=1+1"],
+        headers=headers,
+    )
+
+    response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+    repeated = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+
+    inventory = inventory_repository.snapshot()
+    assert response.status_code == repeated.status_code == 201
+    assert inventory.products[0].showcase_quantity == 1
+    assert inventory.products[-1].showcase_quantity == 0
+    assert inventory.products[-1].available == 4
+    assert (len(inventory.products), inventory.total) == (26, 55)
+
+
+def test_pdf_accepts_showcase_sort_and_contains_display_quantity(authenticated_client, inventory_repository, csrf):
+    inventory_repository.set_showcase_quantity(2, 1)
+
+    response = authenticated_client.get("/one_alma/pdf?sort=9&descending=true")
+
+    text = " ".join(" ".join(page.extract_text().split()) for page in PdfReader(BytesIO(response.content)).pages)
+    assert response.status_code == 200
+    assert "На витрине: 1 шт." in text and "Витрина, шт." in text
 
 
 def test_excel_upload_repeated_file_preserves_counts_ids_and_sales(authenticated_client, inventory_repository, csrf):
@@ -279,6 +381,8 @@ def test_excel_upload_below_sold_quantity_rolls_back_entire_batch(authenticated_
         ("GET", "/one_alma"),
         ("GET", "/one_alma/pdf"),
         ("POST", "/one_alma/units/1"),
+        ("POST", "/one_alma/products/1/sold"),
+        ("POST", "/one_alma/products/1/showcase"),
         ("POST", "/one_alma/products"),
         ("PUT", "/one_alma/products/1"),
         ("DELETE", "/one_alma/products"),
