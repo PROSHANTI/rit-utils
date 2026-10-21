@@ -69,6 +69,8 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert "Импорт товаров" in html and "Удалить выбранные" in html
     assert "Без цены: 4 шт." in html
     assert len(re.findall("data-sort-column=", html)) == 9
+    assert 'data-sort-column="5">Цена ЦБ, ₽ <span' in html
+    assert "Цена по ЦБ РФ на 27.05, ₽" not in html
 
 
 @pytest.mark.parametrize("indices, available", [([1], 1), ([1, 0], 0)])

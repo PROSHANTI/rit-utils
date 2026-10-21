@@ -361,6 +361,8 @@ def test_pdf_contains_every_product_and_current_counts_and_cb_amounts(repository
     assert "Всего товаров: 50. Продано: 1. В наличии: 49." in text
     assert "63 946,54" in text and "1 343,43" in text and "62 603,11" in text
     assert "Стоимость по цене ЦБ РФ" in text
+    assert "Цена ЦБ, ₽" in text
+    assert "Цена по ЦБ РФ на 27.05" not in text
     for product in inventory.products:
         assert product.cells[1] in text
         assert product.cells[2].split()[0] in text
