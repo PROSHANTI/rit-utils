@@ -14,7 +14,12 @@ from typing import BinaryIO
 from fastapi import UploadFile
 from fastapi.responses import RedirectResponse
 
-from src.utils.send_email.email_templates import get_email_template
+try:
+    from src.utils.send_email.email_templates import get_email_template
+except ModuleNotFoundError as exc:
+    if exc.name != "src.utils.send_email.email_templates":
+        raise
+    from src.utils.send_email.email_templates_examples import get_email_template
 
 logger = logging.getLogger(__name__)
 

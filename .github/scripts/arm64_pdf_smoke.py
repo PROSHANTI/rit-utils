@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -24,9 +25,10 @@ from fastapi.responses import FileResponse
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
-# src.utils.__init__ eagerly imports the private email_templates module.
-# Load the unmodified certificate implementation directly to test conversion
-# without creating a private-module substitute or importing SMTP code.
+from src.utils.one_alma.pdf_export import InventoryPdfExporter
+from src.utils.one_alma.repository import InventoryRepository
+
+# Load the certificate implementation directly, as in the original smoke test.
 spec = importlib.util.spec_from_file_location("arm64_smoke_certificate", "/app/src/utils/gen_cert/gen_cert_handler.py")
 assert spec is not None and spec.loader is not None
 certificate_module = importlib.util.module_from_spec(spec)
@@ -116,6 +118,19 @@ baseline["synthetic_pdf_bytes"] = output.stat().st_size
 baseline["substitutions_ok"] = True
 baseline["private_template_used"] = False
 baseline["network_enabled"] = False
+
+with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
+    database = Path(temporary) / "one_alma.sqlite3"
+    inventory_repository = InventoryRepository(database)
+    inventory = inventory_repository.snapshot()
+    assert (inventory.total, inventory.sold, inventory.available) == (50, 0, 50)
+    inventory = inventory_repository.set_sold(inventory.products[0].units[1].id, True)
+    assert (inventory.sold, inventory.available) == (1, 49)
+    assert InventoryRepository(database).snapshot().sold == 1
+    inventory_pdf = InventoryPdfExporter().export(inventory)
+    assert inventory_pdf.startswith(b"%PDF-") and len(inventory_pdf) > 2000
+    baseline["one_alma_pdf_bytes"] = len(inventory_pdf)
+    baseline["one_alma_sqlite_persistence_ok"] = True
 
 Path("/tmp/arm64-runtime-baseline.json").write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n")
 if response.background is not None:

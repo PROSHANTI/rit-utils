@@ -14,10 +14,12 @@ STATE_DIR=${STATE_DIR:-/state}
 POLL_SECONDS=${POLL_SECONDS:-300}
 WAIT_SECONDS=${WAIT_SECONDS:-180}
 STABLE_SECONDS=${STABLE_SECONDS:-20}
+TZ=${TZ:-Europe/Moscow}
+export TZ
 export DOCKER_HOST=unix:///var/run/docker.sock
 unset DOCKER_CONTEXT DOCKER_API_VERSION
 
-log() { printf '%s\n' "$*"; }
+log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"; }
 atomic_write() {
     path=$1
     shift
@@ -93,7 +95,11 @@ rollback_pending() {
     log 'Previous image restored and healthy.'
 }
 poll_once() {
-    [ ! -e "$STATE_DIR/blocked" ] || return 0
+    log "Checking Pi channel $IMAGE_REPOSITORY:$CHANNEL."
+    if [ -e "$STATE_DIR/blocked" ]; then
+        log 'Update check skipped: controller is paused.'
+        return 0
+    fi
     if [ -e "$STATE_DIR/pending" ]; then
         rollback_pending || return 0
     fi
@@ -116,15 +122,34 @@ poll_once() {
         return 0
     fi
     # A manually stopped or unhealthy app is left for an operator to inspect.
-    healthy || return 0
-    if ! docker pull --quiet "$IMAGE_REPOSITORY:$CHANNEL" >/dev/null 2>&1; then
-        log 'Pi channel pull failed; current app is unchanged.'
+    if ! healthy; then
+        log 'Update check skipped: current app is not healthy.'
+        return 0
+    fi
+    if pull_output=$(docker pull --quiet "$IMAGE_REPOSITORY:$CHANNEL" 2>&1); then
+        unset pull_output
+    else
+        pull_status=$?
+        # Registry errors may contain signed URLs: log a fixed reason, never raw output.
+        case "$pull_output" in
+            *toomanyrequests*|*"rate limit"*) pull_reason='registry rate limit' ;;
+            *unauthorized*|*"authentication required"*|*"access denied"*) pull_reason='registry authorization failed' ;;
+            *timeout*|*Timeout*|*"deadline exceeded"*) pull_reason='registry request timed out' ;;
+            *"no such host"*|*"name resolution"*) pull_reason='registry DNS lookup failed' ;;
+            *) pull_reason='registry request failed' ;;
+        esac
+        unset pull_output
+        log "Pi channel pull failed ($pull_reason; exit $pull_status); current app is unchanged."
         return 0
     fi
     candidate=$(docker image inspect --format '{{.Id}}' "$IMAGE_REPOSITORY:$CHANNEL" 2>/dev/null) || return 0
     valid_id "$candidate" || return 0
-    [ "$candidate" != "$previous" ] || return 0
+    if [ "$candidate" = "$previous" ]; then
+        log 'Pi channel is current; app is healthy.'
+        return 0
+    fi
     if grep -Fxq "$candidate" "$STATE_DIR/rejected" 2>/dev/null; then
+        log 'Skipping a previously rejected Pi image; current app is unchanged.'
         return 0
     fi
     arch=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate" 2>/dev/null) || return 0
@@ -154,7 +179,7 @@ poll_once() {
     fi
 }
 
-for tool in docker flock sync grep sed; do
+for tool in date docker flock sync grep sed; do
     command -v "$tool" >/dev/null 2>&1 || { log "Required utility missing: $tool"; exit 1; }
 done
 case "$SERVICE" in ''|*[!a-zA-Z0-9_-]*) log 'Invalid app service'; exit 1 ;; esac
@@ -167,12 +192,13 @@ exec 9>"$STATE_DIR/controller.lock"
 flock -n 9 || { log 'Another rit-utils updater owns the state'; exit 1; }
 docker version >/dev/null 2>&1 || { log 'Docker API/socket check failed'; exit 1; }
 docker compose version >/dev/null 2>&1 || { log 'Docker Compose unavailable'; exit 1; }
-log 'RIT Utils Pi updater started.'
+log "RIT Utils Pi updater started. Poll interval: $POLL_SECONDS seconds. Timezone: $TZ."
 if [ "${1:-}" = --once ]; then
     poll_once
 else
     while :; do
         poll_once
+        log "Next update check in $POLL_SECONDS seconds."
         sleep "$POLL_SECONDS"
     done
 fi

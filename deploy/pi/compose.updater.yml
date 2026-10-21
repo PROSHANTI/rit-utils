@@ -20,7 +20,14 @@ services:
       WAIT_SECONDS: '180'
       STABLE_SECONDS: '20'
       STATE_DIR: /state
+      TZ: Europe/Moscow
     volumes:
+      - type: bind
+        source: /usr/share/zoneinfo/Europe/Moscow
+        target: /usr/share/zoneinfo/Europe/Moscow
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock

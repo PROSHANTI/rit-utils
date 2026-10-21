@@ -13,7 +13,9 @@ class TestCookieSettings:
 
     def test_get_cookie_settings(self, mock_request):
         """Test getting cookie settings"""
-        settings = asdict(CookiePolicy())
+        policy = CookiePolicy()
+
+        settings = asdict(policy)
 
         assert isinstance(settings, dict)
         assert settings["secure"] is True

@@ -145,17 +145,12 @@ class TestConfig:
     @patch.dict(os.environ, {}, clear=True)
     def test_config_import(self):
         """Test config module import"""
-        try:
-            config_module = import_module("src.config")
-            assert config_module.__name__ == "src.config"
-        except Exception as e:
-            pytest.fail(f"Config import failed: {e}")
+        config_module = import_module("src.config")
+
+        assert config_module.__name__ == "src.config"
 
     def test_config_module_accessible(self):
         """Test config module accessibility"""
-        try:
-            import src.config
+        config_module = import_module("src.config")
 
-            assert src.config is not None
-        except Exception as e:
-            pytest.fail(f"Config module not accessible: {e}")
+        assert config_module is not None

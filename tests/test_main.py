@@ -56,10 +56,17 @@ class TestApplicationRoutes:
             ("/doctor_form", "POST"),
             ("/remove_bg", "GET"),
             ("/remove_bg", "POST"),
+            ("/one_alma", "GET"),
+            ("/one_alma/units/{unit_id}", "POST"),
+            ("/one_alma/pdf", "GET"),
+            ("/one_alma/products", "POST"),
+            ("/one_alma/products/{product_id}", "PUT"),
+            ("/one_alma/products", "DELETE"),
+            ("/one_alma/import", "POST"),
         }
 
-        assert len(router_routes) == 13
-        assert len(application_routes) == 13
+        assert len(router_routes) == 20
+        assert len(application_routes) == 20
         assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
         assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 
@@ -86,6 +93,13 @@ class TestApplicationRoutes:
             pytest.param("/doctor_form", "POST", 1, id="doctor-post-protected"),
             pytest.param("/remove_bg", "GET", 1, id="image-get-protected"),
             pytest.param("/remove_bg", "POST", 1, id="image-post-protected"),
+            pytest.param("/one_alma", "GET", 1, id="inventory-protected"),
+            pytest.param("/one_alma/units/{unit_id}", "POST", 1, id="inventory-sales-protected"),
+            pytest.param("/one_alma/pdf", "GET", 1, id="inventory-pdf-protected"),
+            pytest.param("/one_alma/products", "POST", 1, id="inventory-create-protected"),
+            pytest.param("/one_alma/products/{product_id}", "PUT", 1, id="inventory-update-protected"),
+            pytest.param("/one_alma/products", "DELETE", 1, id="inventory-delete-protected"),
+            pytest.param("/one_alma/import", "POST", 1, id="inventory-import-protected"),
         ],
     )
     def test_each_route_keeps_its_auth_dependency(self, app, path, method, expected_dependencies):
