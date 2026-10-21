@@ -116,19 +116,21 @@ class OneAlmaHandler:
             importer = ExcelProductImporter()
             content = file.file.read(importer.max_file_size + 1)
             products = importer.parse(content, file.filename or "")
-            self.repository.import_products(products)
+            result = self.repository.import_products(products)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except sqlite3.IntegrityError:
             raise HTTPException(
-                status_code=409, detail="В файле или учёте уже есть такой номер позиции. Импорт отменён."
+                status_code=409, detail="Не удалось согласовать позиции. Обновите страницу и повторите импорт."
             ) from None
         except sqlite3.Error:
             logger.exception("Не удалось импортировать товары OneAlma")
             raise HTTPException(status_code=503, detail="Не удалось сохранить импорт. Попробуйте позже.") from None
         finally:
             file.file.close()
-        return JSONResponse({"detail": f"Добавлено позиций: {len(products)}"}, status_code=201)
+        return JSONResponse(
+            {"detail": f"Добавлено позиций: {result.added}. Обновлено позиций: {result.updated}."}, status_code=201
+        )
 
     def download_pdf(self, sort: int = 0, descending: bool = False) -> Response:
         try:

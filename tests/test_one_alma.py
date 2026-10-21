@@ -7,7 +7,7 @@ from io import BytesIO
 import pytest
 from pypdf import PdfReader
 
-from src.utils.one_alma.models import NewProduct
+from src.utils.one_alma.models import ImportResult, NewProduct
 from src.utils.one_alma.pdf_export import InventoryPdfExporter
 from src.utils.one_alma.repository import InventoryRepository
 
@@ -33,8 +33,11 @@ def new_product():
 
 
 def test_first_request_creates_database_and_imports_exact_seed(repository):
-    assert not repository.database.exists()
+    existed_before = repository.database.exists()
+
     inventory = repository.snapshot()
+
+    assert not existed_before
     assert repository.database.is_file()
     assert (len(inventory.products), inventory.total, inventory.sold, inventory.available) == (25, 50, 0, 50)
     assert inventory.products[12].cells[1] == "0262"
@@ -45,17 +48,25 @@ def test_first_request_creates_database_and_imports_exact_seed(repository):
     assert inventory.valuations[2].total == Decimal("230233.92")
 
 
-def test_second_checkbox_is_one_unit_and_both_checks_leave_zero(repository):
+@pytest.mark.parametrize("indices, sold, available, amount", [([1], 1, 1, "1343.43"), ([1, 0], 2, 0, "2686.86")])
+def test_checkboxes_count_individual_units(repository, indices, sold, available, amount):
     product = repository.snapshot().products[0]
-    second = repository.set_sold(product.units[1].id, True)
-    assert (second.sold, second.available) == (1, 49)
-    assert (second.products[0].sold_count, second.products[0].available) == (1, 1)
-    assert second.valuations[0].sold == Decimal("1343.43")
-    both = repository.set_sold(product.units[0].id, True)
-    assert (both.sold, both.available) == (2, 48)
-    assert both.products[0].available == 0
-    assert both.valuations[0].sold == Decimal("2686.86")
+
+    inventories = [repository.set_sold(product.units[index].id, True) for index in indices]
+
+    inventory = inventories[-1]
+    assert (inventory.sold, inventory.available) == (sold, 50 - sold)
+    assert (inventory.products[0].sold_count, inventory.products[0].available) == (sold, available)
+    assert inventory.valuations[0].sold == Decimal(amount)
+
+
+def test_unchecking_sale_restores_one_available_unit(repository):
+    product = repository.snapshot().products[0]
+    for unit in product.units:
+        repository.set_sold(unit.id, True)
+
     undone = repository.set_sold(product.units[1].id, False)
+
     assert undone.products[0].available == 1
     assert undone.sold == 1
 
@@ -63,36 +74,56 @@ def test_second_checkbox_is_one_unit_and_both_checks_leave_zero(repository):
 def test_repeat_sale_is_idempotent_and_survives_new_repository(repository):
     unit = repository.snapshot().products[0].units[0]
     repository.set_sold(unit.id, True)
+
     repository.set_sold(unit.id, True)
+
     reopened = InventoryRepository(repository.database).snapshot()
     assert (reopened.total, reopened.sold, reopened.available) == (50, 1, 49)
 
 
 def test_unknown_price_is_counted_separately_not_as_zero(repository):
     product = repository.snapshot().products[3]
+
     inventory = repository.set_sold(product.units[0].id, True)
+
     assert inventory.valuations[1].unpriced == (4, 1, 3)
     assert inventory.valuations[1].sold == 0
     assert inventory.valuations[0].sold == Decimal("305.50")
 
 
-def test_concurrent_first_requests_seed_once_and_sales_do_not_lose_updates(tmp_path):
+def test_concurrent_first_requests_seed_once(tmp_path):
     path = tmp_path / "concurrent.sqlite3"
+
     with ThreadPoolExecutor(max_workers=4) as pool:
         inventories = list(pool.map(lambda _: InventoryRepository(path).snapshot(), range(4)))
-        assert all(inventory.total == 50 for inventory in inventories)
-        units = inventories[0].products[0].units
-        list(pool.map(lambda unit: InventoryRepository(path).set_sold(unit.id, True), units))
-    assert InventoryRepository(path).snapshot().sold == 2
+
+    assert all(inventory.total == 50 for inventory in inventories)
 
 
-def test_create_and_edit_preserve_sales_and_update_financial_totals(repository, new_product):
+def test_concurrent_sales_do_not_lose_updates(repository):
+    units = repository.snapshot().products[0].units
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda unit: InventoryRepository(repository.database).set_sold(unit.id, True), units))
+
+    assert InventoryRepository(repository.database).snapshot().sold == 2
+
+
+def test_create_adds_product_fields_and_quantity(repository, new_product):
     repository.add_product(new_product)
+
     inventory = repository.snapshot()
     product = inventory.products[-1]
     assert (inventory.total, product.cells[1], product.cells[4]) == (53, "0007", "09.2028")
+
+
+def test_edit_preserves_sales_and_updates_financial_totals(repository, new_product):
+    repository.add_product(new_product)
+    product = repository.snapshot().products[-1]
     repository.set_sold(product.units[2].id, True)
+
     repository.update_product(product.id, replace(new_product, name="Новый крем", quantity=1, central_bank_price="110.25"))
+
     edited = InventoryRepository(repository.database).snapshot()
     updated = edited.products[-1]
     assert updated.cells[2] == "Новый крем"
@@ -100,7 +131,15 @@ def test_create_and_edit_preserve_sales_and_update_financial_totals(repository, 
     assert updated.units[0].id == product.units[2].id
     assert updated.units[0].number == 1
     assert edited.valuations[0].sold == Decimal("110.25")
+
+
+def test_edit_increases_quantity_without_resetting_sales(repository, new_product):
+    repository.add_product(new_product)
+    product = repository.snapshot().products[-1]
+    repository.set_sold(product.units[2].id, True)
+
     repository.update_product(product.id, replace(new_product, quantity=4))
+
     assert repository.snapshot().products[-1].sold_count == 1
     assert repository.snapshot().products[-1].available == 3
 
@@ -110,30 +149,150 @@ def test_quantity_cannot_be_lower_than_sold_and_change_rolls_back(repository, ne
     product = repository.snapshot().products[-1]
     repository.set_sold(product.units[0].id, True)
     repository.set_sold(product.units[1].id, True)
+
     with pytest.raises(ValueError, match="меньше"):
         repository.update_product(product.id, replace(new_product, name="Не должно сохраниться", quantity=1))
+
     assert repository.snapshot().products[-1].cells[2] == new_product.name
     assert repository.snapshot().total == 53
 
 
-def test_import_duplicate_position_rolls_back_entire_batch(repository, new_product):
-    with pytest.raises(sqlite3.IntegrityError):
-        repository.import_products([new_product, replace(new_product, position=1)])
-    assert len(repository.snapshot().products) == 25
-    assert repository.snapshot().total == 50
-
-
-def test_bulk_delete_is_atomic_and_deleted_ids_are_not_reused(repository, new_product):
+def test_import_updates_by_position_adds_new_and_leaves_other_products_unchanged(repository, new_product):
     initial = repository.snapshot()
+    first = initial.products[0]
+    changed = replace(new_product, position=1, article="0262", name="Обновлённый крем", quantity=2, wholesale_price="")
+
+    result = repository.import_products([changed, new_product])
+
+    inventory = InventoryRepository(repository.database).snapshot()
+    assert result == ImportResult(added=1, updated=1)
+    assert (len(inventory.products), inventory.total) == (26, 53)
+    assert inventory.products[0].id == first.id
+    assert inventory.products[0].cells == changed.to_cells()
+    assert inventory.products[0].units == first.units
+    assert inventory.products[1:-1] == initial.products[1:]
+    assert inventory.products[-1].cells == new_product.to_cells()
+
+
+def test_repeat_import_preserves_sales_unit_ids_and_sequences(repository, new_product):
+    repository.import_products([new_product])
+    added = repository.snapshot().products[-1]
+    before = repository.set_sold(added.units[-1].id, True)
+    with sqlite3.connect(repository.database) as connection:
+        stored_before = list(connection.iterdump())
+
+    result = repository.import_products([new_product])
+
+    assert result == ImportResult(added=0, updated=1)
+    assert repository.snapshot() == before
+    with sqlite3.connect(repository.database) as connection:
+        assert list(connection.iterdump()) == stored_before
+
+
+@pytest.mark.parametrize("quantity", [1, 5])
+def test_import_resizes_total_quantity_without_losing_sold_units(repository, new_product, quantity):
+    repository.add_product(new_product)
+    original = repository.snapshot().products[-1]
+    sold_unit = original.units[-1]
+    repository.set_sold(sold_unit.id, True)
+    changed = replace(new_product, quantity=quantity, central_bank_price="110.25")
+
+    result = repository.import_products([changed])
+
+    inventory = repository.snapshot()
+    updated = inventory.products[-1]
+    assert result == ImportResult(added=0, updated=1)
+    assert updated.id == original.id
+    assert (len(updated.units), updated.sold_count, updated.available) == (quantity, 1, quantity - 1)
+    assert [unit.number for unit in updated.units] == list(range(1, quantity + 1))
+    assert next(unit for unit in updated.units if unit.sold).id == sold_unit.id
+    assert inventory.valuations[0].sold == Decimal("110.25")
+    if quantity > len(original.units):
+        assert updated.units[: len(original.units)] == original.units[:-1] + (replace(sold_unit, sold=True),)
+        assert all(unit.id > sold_unit.id and not unit.sold for unit in updated.units[len(original.units) :])
+
+
+@pytest.mark.parametrize("position", [1, 26])
+def test_duplicate_position_in_import_file_rolls_back_entire_batch(repository, new_product, position):
+    before = repository.snapshot()
+    repeated = replace(new_product, position=position)
+
+    with pytest.raises(ValueError, match=f"повторяется № {position}"):
+        repository.import_products([repeated, replace(repeated, name="Повтор")])
+
+    assert repository.snapshot() == before
+
+
+def test_import_quantity_below_sales_rolls_back_additions_updates_and_sequences(repository, new_product):
+    first = repository.snapshot().products[0]
+    for unit in first.units:
+        repository.set_sold(unit.id, True)
+    before = repository.snapshot()
+    with sqlite3.connect(repository.database) as connection:
+        stored_before = list(connection.iterdump())
+    products = [new_product, replace(new_product, position=2, quantity=4), replace(new_product, position=1, quantity=1)]
+
+    with pytest.raises(ValueError, match="№ 1: количество не может быть меньше"):
+        repository.import_products(products)
+
+    assert InventoryRepository(repository.database).snapshot() == before
+    with sqlite3.connect(repository.database) as connection:
+        assert list(connection.iterdump()) == stored_before
+
+
+def test_import_validates_all_fields_before_changing_database(repository, new_product):
+    products = [new_product, replace(new_product, position=1, market_price="-1")]
+
+    with pytest.raises(ValueError, match="Цена"):
+        repository.import_products(products)
+
+    assert not repository.database.exists()
+
+
+def test_concurrent_imports_of_same_position_do_not_create_duplicates(repository, new_product):
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: InventoryRepository(repository.database).import_products([new_product]), range(4)))
+
+    inventory = repository.snapshot()
+    assert sum(result.added for result in results) == 1
+    assert sum(result.updated for result in results) == 3
+    assert (len(inventory.products), inventory.total) == (26, 53)
+    assert len([product for product in inventory.products if product.cells[0] == "26"]) == 1
+
+
+def test_bulk_delete_is_atomic_when_any_product_is_missing(repository):
+    initial = repository.snapshot()
+
     with pytest.raises(LookupError):
         repository.delete_products([initial.products[0].id, 9999])
-    assert len(repository.snapshot().products) == 25
+
+    assert repository.snapshot() == initial
+
+
+def test_bulk_delete_removes_all_selected_products(repository):
+    initial = repository.snapshot()
+
     repository.delete_products([product.id for product in initial.products])
+
     assert InventoryRepository(repository.database).snapshot().total == 0
+
+
+def test_deleted_product_and_unit_ids_are_not_reused(repository, new_product):
+    initial = repository.snapshot()
+    repository.delete_products([product.id for product in initial.products])
+
     repository.add_product(new_product)
+
     product = repository.snapshot().products[0]
     assert product.id > initial.products[-1].id
     assert product.units[0].id > initial.products[-1].units[-1].id
+
+
+def test_deleted_unit_cannot_be_sold_after_adding_new_product(repository, new_product):
+    initial = repository.snapshot()
+    repository.delete_products([product.id for product in initial.products])
+    repository.add_product(new_product)
+
     with pytest.raises(LookupError):
         repository.set_sold(initial.products[0].units[0].id, True)
 
@@ -142,38 +301,63 @@ def test_bulk_delete_is_atomic_and_deleted_ids_are_not_reused(repository, new_pr
 @pytest.mark.parametrize("descending", [False, True])
 def test_sort_preserves_all_products_and_totals(repository, column, descending):
     inventory = repository.snapshot()
+
     sorted_inventory = inventory.sorted_by(column, descending)
+
     assert {product.id for product in sorted_inventory.products} == {product.id for product in inventory.products}
     assert sorted_inventory.total == 50
     assert sorted_inventory.valuations == inventory.valuations
 
 
-def test_numeric_date_and_sold_sort_order_and_missing_prices_last(repository):
+@pytest.mark.parametrize(
+    "column, descending, expected",
+    [(0, False, ["1", "2", "3"]), (0, True, ["25", "24", "23"]), (4, False, ["04.2025"]), (4, True, ["10.2028"])],
+)
+def test_numeric_and_date_sort_order(repository, column, descending, expected):
     inventory = repository.snapshot()
-    assert [product.cells[0] for product in inventory.sorted_by(0).products][:3] == ["1", "2", "3"]
-    assert [product.cells[0] for product in inventory.sorted_by(0, True).products][:3] == ["25", "24", "23"]
-    assert inventory.sorted_by(4).products[0].cells[4] == "04.2025"
-    assert inventory.sorted_by(4, True).products[0].cells[4] == "10.2028"
-    for descending in (True, False):
-        assert all(product.cells[6] == "—" for product in inventory.sorted_by(6, descending).products[-2:])
+
+    sorted_inventory = inventory.sorted_by(column, descending)
+
+    assert [product.cells[column] for product in sorted_inventory.products][: len(expected)] == expected
+
+
+@pytest.mark.parametrize("descending", [True, False])
+def test_missing_prices_are_sorted_last(repository, descending):
+    inventory = repository.snapshot()
+
+    sorted_inventory = inventory.sorted_by(6, descending)
+
+    assert all(product.cells[6] == "—" for product in sorted_inventory.products[-2:])
+
+
+def test_sold_sort_order(repository):
+    inventory = repository.snapshot()
     updated = repository.set_sold(inventory.products[5].units[0].id, True)
-    assert updated.sorted_by(8, True).products[0].id == inventory.products[5].id
+
+    sorted_inventory = updated.sorted_by(8, True)
+
+    assert sorted_inventory.products[0].id == inventory.products[5].id
 
 
 @pytest.mark.parametrize("price", ["-1", "NaN", "Infinity", "10,345", "=1+1", "abc"])
 def test_invalid_prices_rejected_before_database_mutation(repository, new_product, price):
+    invalid = replace(new_product, central_bank_price=price)
+
     with pytest.raises(ValueError):
-        repository.add_product(replace(new_product, central_bank_price=price))
+        repository.add_product(invalid)
+
     assert not repository.database.exists()
 
 
 def test_pdf_contains_every_product_and_current_counts_and_cb_amounts(repository):
     inventory = repository.snapshot()
     inventory = repository.set_sold(inventory.products[0].units[1].id, True)
+
     pdf = InventoryPdfExporter().export(inventory.sorted_by(0, True))
-    assert pdf.startswith(b"%PDF-")
+
     reader = PdfReader(BytesIO(pdf))
     text = "\n".join(page.extract_text() for page in reader.pages)
+    assert pdf.startswith(b"%PDF-")
     assert "Всего товаров: 50. Продано: 1. В наличии: 49." in text
     assert "63 946,54" in text and "1 343,43" in text and "62 603,11" in text
     assert "Стоимость по цене ЦБ РФ" in text
@@ -185,6 +369,8 @@ def test_pdf_contains_every_product_and_current_counts_and_cb_amounts(repository
 
 def test_pdf_can_export_empty_inventory(repository):
     repository.delete_products([product.id for product in repository.snapshot().products])
+
     pdf = InventoryPdfExporter().export(repository.snapshot())
+
     text = PdfReader(BytesIO(pdf)).pages[0].extract_text()
     assert "Всего товаров: 0" in text

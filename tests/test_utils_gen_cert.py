@@ -109,6 +109,8 @@ class TestCertificateGenerator:
         converter = MagicMock(spec=LibreOfficeConverter)
 
         response = CertificateGenerator(converter=converter).generate(CertificateRequest(name=name, price=price))
+        if response.background is not None:
+            await response.background()
 
         assert isinstance(response, FileResponse)
         assert response.filename == "Сертификат.pdf"
@@ -118,7 +120,6 @@ class TestCertificateGenerator:
         pptx_path, pdf_path = converter.convert.call_args.args
         assert response.path == pdf_path
         assert response.background is not None
-        await response.background()
         assert not Path(pptx_path).is_file()
         assert not Path(pdf_path).is_file()
 

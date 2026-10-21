@@ -61,13 +61,14 @@ class TestDoctorFormGenerator:
         date_run.text = "Дата"
 
         response = DoctorFormGenerator().generate(DoctorFormRequest(date=date))
+        if response.background is not None:
+            await response.background()
 
         assert isinstance(response, FileResponse)
         assert response.filename == "Бланк Врача на печать.pptx"
         assert response.media_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         assert date_run.text == expected_date
         assert response.background is not None
-        await response.background()
         assert not Path(response.path).is_file()
 
     @pytest.mark.asyncio
@@ -91,6 +92,8 @@ class TestDoctorFormGenerator:
         )
 
         response = DoctorFormGenerator().generate(data)
+        if response.background is not None:
+            await response.background()
 
         assert isinstance(response, FileResponse)
         assert [run.text for run in runs] == [
@@ -105,7 +108,6 @@ class TestDoctorFormGenerator:
         ]
         assert second_run.text == "ВРАЧ: doctor 1"
         assert response.background is not None
-        await response.background()
 
     @patch.object(Path, "exists", return_value=False)
     @patch.object(DoctorFormGenerator, "_get_current_date", return_value=(15, "марта", 2024))

@@ -4,6 +4,7 @@ import base64
 import logging
 from http.cookies import SimpleCookie
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import cv2
@@ -188,25 +189,23 @@ class TestRemoveBackgroundHandler:
         background_tasks = BackgroundTasks()
         handler = RemoveBackgroundHandler()
 
-        result = handler.handle(background_tasks=background_tasks, file=mock_file_upload, color="255,0,0")
+        result = cast(FileResponse, handler.handle(background_tasks=background_tasks, file=mock_file_upload, color="255,0,0"))
+        temporary_paths = [Path(f"{path}") for path in background_tasks.tasks[0].args]
+        temporary_files_existed = all(path.exists() for path in temporary_paths)
+        try:
+            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
+        finally:
+            await background_tasks()
 
         assert isinstance(result, FileResponse)
         assert result.filename == "document_no_bg.png"
         assert result.media_type == "image/png"
         assert result.background is background_tasks
         assert len(background_tasks.tasks) == 1
-        temporary_paths = [Path(f"{path}") for path in background_tasks.tasks[0].args]
-        assert all(path.exists() for path in temporary_paths)
-
-        try:
-            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
-            assert processed_image is not None
-            np.testing.assert_array_equal(processed_image[3, 3], [0, 0, 255, 255])
-            assert processed_image[0, 0, 3] == 0
-
-        finally:
-            await background_tasks()
-
+        assert temporary_files_existed
+        assert processed_image is not None
+        np.testing.assert_array_equal(processed_image[3, 3], [0, 0, 255, 255])
+        assert processed_image[0, 0, 3] == 0
         assert all(not path.exists() for path in temporary_paths)
 
     @pytest.mark.parametrize(
@@ -231,18 +230,18 @@ class TestRemoveBackgroundHandler:
         mock_file_upload.file.read.return_value = input_path.read_bytes()
         background_tasks = BackgroundTasks()
 
-        result = RemoveBackgroundHandler().handle(background_tasks=background_tasks, file=mock_file_upload, color=color)
+        result = cast(
+            FileResponse, RemoveBackgroundHandler().handle(background_tasks=background_tasks, file=mock_file_upload, color=color)
+        )
+        try:
+            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
+        finally:
+            await background_tasks()
 
         assert isinstance(result, FileResponse)
         assert result.filename == "my_image_no_bg.png"
-
-        try:
-            processed_image = cv2.imread(f"{result.path}", cv2.IMREAD_UNCHANGED)
-            assert processed_image is not None
-            np.testing.assert_array_equal(processed_image[3, 3, :3], expected_bgr)
-
-        finally:
-            await background_tasks()
+        assert processed_image is not None
+        np.testing.assert_array_equal(processed_image[3, 3, :3], expected_bgr)
 
     @pytest.mark.parametrize(
         ("filename", "color", "expected_error"),

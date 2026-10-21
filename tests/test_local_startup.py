@@ -10,6 +10,7 @@ def test_application_starts_without_private_email_template():
     project = Path(__file__).resolve().parent.parent
     if (project / "src/utils/send_email/email_templates.py").exists():
         pytest.skip("Private template is present in this checkout")
+
     result = subprocess.run(
         [sys.executable, "-c", "from src.main import app; assert app is not None"],
         cwd=project,
@@ -24,4 +25,5 @@ def test_application_starts_without_private_email_template():
         text=True,
         timeout=30,
     )
+
     assert result.returncode == 0, result.stderr

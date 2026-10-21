@@ -55,6 +55,12 @@ class NewProduct:
 
 
 @dataclass(frozen=True, slots=True)
+class ImportResult:
+    added: int
+    updated: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProductUnit:
     id: int
     number: int

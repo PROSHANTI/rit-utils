@@ -94,9 +94,11 @@ def exercise(case: str) -> None:
             "FAKE_DOCKER_STATE": str(daemon_file),
             "STABLE_SECONDS": "0",
         }
+
         result = subprocess.run(["/bin/sh", str(SCRIPT), "--once"], env=environment, capture_output=True, text=True, timeout=20)
-        assert result.returncode == 0, (case, result.stdout, result.stderr)
+
         actual = json.loads(daemon_file.read_text())
+        assert result.returncode == 0, (case, result.stdout, result.stderr)
         assert all(not any(word in call for word in ("down", "prune", "rm")) for call in actual["calls"])
         if case == "success":
             assert actual["deployments"] == [NEW]

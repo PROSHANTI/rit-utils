@@ -56,15 +56,17 @@ class TestAuthEndpoints:
         assert not response.headers.get_list("set-cookie")
 
     def test_valid_credentials_set_protected_session_cookies(self, authenticated_client):
+        access_name = application.auth.config.JWT_ACCESS_COOKIE_NAME
+        refresh_name = application.auth.config.JWT_REFRESH_COOKIE_NAME
+
         response = authenticated_client.post(
             "/login", data={"username": "test_admin", "password": "test_password"}, follow_redirects=False
         )
+        home_response = authenticated_client.get("/home")
 
+        cookies = _response_cookies(response)
         assert response.status_code == 303
         assert response.headers["location"] == "/home"
-        cookies = _response_cookies(response)
-        access_name = application.auth.config.JWT_ACCESS_COOKIE_NAME
-        refresh_name = application.auth.config.JWT_REFRESH_COOKIE_NAME
         assert set(cookies) == {access_name, refresh_name}
 
         for cookie in cookies.values():
@@ -74,7 +76,7 @@ class TestAuthEndpoints:
             assert cookie["samesite"] == "lax"
 
         assert cookies[refresh_name]["max-age"] == f"{7 * 24 * 60 * 60}"
-        assert authenticated_client.get("/home").status_code == 200
+        assert home_response.status_code == 200
 
     def test_refresh_without_cookie_redirects_login(self, client):
         response = client.post("/refresh", follow_redirects=False)
@@ -89,28 +91,32 @@ class TestAuthEndpoints:
         previous_refresh = authenticated_client.cookies.get(refresh_name)
 
         response = authenticated_client.post("/refresh", follow_redirects=False)
+        home_response = authenticated_client.get("/home")
 
         assert response.status_code == 303
         assert response.headers["location"] == "/home"
         assert authenticated_client.cookies.get(access_name) != previous_access
         assert authenticated_client.cookies.get(refresh_name) == previous_refresh
-        assert authenticated_client.get("/home").status_code == 200
+        assert home_response.status_code == 200
 
-    def test_logout_removes_cookies_and_rejects_replayed_refresh(self, authenticated_client):
+    def test_logout_removes_session_cookies(self, authenticated_client):
         access_name = application.auth.config.JWT_ACCESS_COOKIE_NAME
         refresh_name = application.auth.config.JWT_REFRESH_COOKIE_NAME
-        previous_refresh = authenticated_client.cookies.get(refresh_name)
-        assert previous_refresh is not None
 
         response = authenticated_client.post("/logout", follow_redirects=False)
 
+        cookies = _response_cookies(response)
         assert response.status_code == 303
         assert response.headers["location"] == "/"
-        cookies = _response_cookies(response)
         assert set(cookies) == {access_name, refresh_name}
         assert all(cookie["max-age"] == "0" for cookie in cookies.values())
         assert authenticated_client.cookies.get(access_name) is None
         assert authenticated_client.cookies.get(refresh_name) is None
+
+    def test_logout_rejects_replayed_refresh_token(self, authenticated_client):
+        refresh_name = application.auth.config.JWT_REFRESH_COOKIE_NAME
+        previous_refresh = authenticated_client.cookies[refresh_name]
+        authenticated_client.post("/logout", follow_redirects=False)
         authenticated_client.cookies.set(refresh_name, previous_refresh, domain="testserver.local", path="/")
 
         replay_response = authenticated_client.post("/refresh", follow_redirects=False)
@@ -146,6 +152,7 @@ class TestProtectedEndpoints:
         ):
             response = client.request(method, path, follow_redirects=False)
 
+        cookies = _response_cookies(response)
         logout.assert_not_called()
         email.handle.assert_not_called()
         certificates.generate.assert_not_called()
@@ -154,7 +161,6 @@ class TestProtectedEndpoints:
 
         assert response.status_code == 303
         assert response.headers["location"] == "/"
-        cookies = _response_cookies(response)
         assert set(cookies) == {
             application.auth.config.JWT_ACCESS_COOKIE_NAME,
             application.auth.config.JWT_REFRESH_COOKIE_NAME,
@@ -190,6 +196,8 @@ class TestEmailEndpoints:
             files={"attachment": ("report.xlsx", b"test report", "application/vnd.ms-excel")},
             follow_redirects=False,
         )
+        status_page = authenticated_client.get("/send_email")
+        repeated_status_page = authenticated_client.get("/send_email")
 
         assert response.status_code == 303
         assert response.headers["location"] == "/send_email"
@@ -207,13 +215,11 @@ class TestEmailEndpoints:
         mock_smtp.quit.assert_called_once()
         mock_smtp.close.assert_called_once()
 
-        status_page = authenticated_client.get("/send_email")
-
         assert status_page.status_code == 200
         assert "Письмо успешно отправлено в 18:45" in status_page.text
         assert _response_cookies(status_page)["email_status"]["max-age"] == "0"
         assert authenticated_client.cookies.get("email_status") is None
-        assert "Письмо успешно отправлено в 18:45" not in authenticated_client.get("/send_email").text
+        assert "Письмо успешно отправлено в 18:45" not in repeated_status_page.text
 
     def test_partial_report_omits_empty_and_missing_payments(self, authenticated_client, mock_smtp):
         response = authenticated_client.post(
@@ -368,12 +374,13 @@ class TestStatusPages:
         authenticated_client.cookies.set(cookie_name, encoded_status, domain="testserver.local", path="/")
 
         response = authenticated_client.get(path)
+        repeated_response = authenticated_client.get(path)
 
         assert response.status_code == 200
         assert status_message in response.text
         assert _response_cookies(response)[cookie_name]["max-age"] == "0"
         assert authenticated_client.cookies.get(cookie_name) is None
-        assert status_message not in authenticated_client.get(path).text
+        assert status_message not in repeated_response.text
 
     @pytest.mark.parametrize("cookie_value", ["not-base64", "/w=="])
     def test_invalid_status_cookie_displays_decode_error_and_is_cleared(self, authenticated_client, cookie_value):

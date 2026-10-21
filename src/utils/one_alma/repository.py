@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import Inventory, NewProduct, Product, ProductUnit
+from .models import ImportResult, Inventory, NewProduct, Product, ProductUnit
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +36,26 @@ class InventoryRepository:
             self._insert_product(connection, cells, product.quantity)
         logger.info("Добавлена позиция OneAlma: %s", " ".join(product.name.split()))
 
-    def import_products(self, products: list[NewProduct]) -> None:
+    def import_products(self, products: list[NewProduct]) -> ImportResult:
         prepared = [(product.to_cells(), product.quantity) for product in products]
+        positions: set[str] = set()
+        for cells, _ in prepared:
+            if cells[0] in positions:
+                raise ValueError(f"В файле повторяется № {cells[0]}. Оставьте одну строку для каждой позиции. Импорт отменён.")
+            positions.add(cells[0])
+        added = updated = 0
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             for cells, quantity in prepared:
-                self._insert_product(connection, cells, quantity)
-        logger.info("Импорт товаров OneAlma завершён: %s позиций", len(products))
+                existing = connection.execute("SELECT id FROM products WHERE position=?", (cells[0],)).fetchone()
+                if existing is None:
+                    self._insert_product(connection, cells, quantity)
+                    added += 1
+                else:
+                    self._update_product(connection, existing["id"], cells, quantity)
+                    updated += 1
+        logger.info("Импорт товаров OneAlma завершён: добавлено %s, обновлено %s", added, updated)
+        return ImportResult(added=added, updated=updated)
 
     def update_product(self, product_id: int, product: NewProduct) -> None:
         cells = product.to_cells()
@@ -51,28 +64,7 @@ class InventoryRepository:
             connection.execute("BEGIN IMMEDIATE")
             if not connection.execute("SELECT 1 FROM products WHERE id = ?", (product_id,)).fetchone():
                 raise LookupError("Товар не найден")
-            units = connection.execute(
-                "SELECT * FROM product_units WHERE product_id = ? ORDER BY number", (product_id,)
-            ).fetchall()
-            if product.quantity < sum(unit["sold"] for unit in units):
-                raise ValueError("Количество не может быть меньше числа уже проданных товаров.")
-            connection.execute(
-                """UPDATE products SET position=?, article=?, name=?, volume=?, expiry=?,
-                   central_bank_price=?, wholesale_price=?, market_price=? WHERE id=?""",
-                (*cells, product_id),
-            )
-            if product.quantity < len(units):
-                removable = [unit for unit in reversed(units) if not unit["sold"]][: len(units) - product.quantity]
-                connection.executemany("DELETE FROM product_units WHERE id=?", [(unit["id"],) for unit in removable])
-                remaining = connection.execute(
-                    "SELECT id FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
-                ).fetchall()
-                connection.executemany(
-                    "UPDATE product_units SET number=? WHERE id=?",
-                    [(number, unit["id"]) for number, unit in enumerate(remaining, start=1)],
-                )
-            elif product.quantity > len(units):
-                self._insert_units(connection, product_id, len(units) + 1, product.quantity)
+            self._update_product(connection, product_id, cells, product.quantity)
         logger.info("Позиция OneAlma обновлена: %s", product_id)
 
     def delete_products(self, product_ids: list[int]) -> None:
@@ -184,6 +176,29 @@ class InventoryRepository:
             "INSERT INTO product_units (id, product_id, number) VALUES (?, ?, ?)",
             [(first + number - start, product_id, number) for number in range(start, end + 1)],
         )
+
+    @classmethod
+    def _update_product(cls, connection: sqlite3.Connection, product_id: int, cells: tuple[str, ...], quantity: int) -> None:
+        units = connection.execute("SELECT * FROM product_units WHERE product_id=? ORDER BY number", (product_id,)).fetchall()
+        if quantity < sum(unit["sold"] for unit in units):
+            raise ValueError(f"№ {cells[0]}: количество не может быть меньше числа уже проданных товаров.")
+        connection.execute(
+            """UPDATE products SET position=?, article=?, name=?, volume=?, expiry=?,
+               central_bank_price=?, wholesale_price=?, market_price=? WHERE id=?""",
+            (*cells, product_id),
+        )
+        if quantity < len(units):
+            removable = [unit for unit in reversed(units) if not unit["sold"]][: len(units) - quantity]
+            connection.executemany("DELETE FROM product_units WHERE id=?", [(unit["id"],) for unit in removable])
+            remaining = connection.execute(
+                "SELECT id FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
+            ).fetchall()
+            connection.executemany(
+                "UPDATE product_units SET number=? WHERE id=?",
+                [(number, unit["id"]) for number, unit in enumerate(remaining, start=1)],
+            )
+        elif quantity > len(units):
+            cls._insert_units(connection, product_id, len(units) + 1, quantity)
 
     @staticmethod
     def _snapshot(connection: sqlite3.Connection) -> Inventory:
