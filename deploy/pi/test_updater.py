@@ -1,6 +1,7 @@
 """Exercise actual updater failure/recovery logic without a Docker daemon."""
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,7 @@ def finish(code=0, out=""):
     if out: print(out)
     sys.exit(code)
 if a == ["version"] or a == ["compose", "version"]: finish()
-if a[0] == "pull": finish(0 if s["pull_ok"] else 1)
+if a[0] == "pull": finish(0 if s["pull_ok"] else 1, s["pull_error"])
 if a[0] == "inspect":
     if not s["actual"]: finish(1)
     if a[2] == "{{.Image}}": finish(out=s["actual"])
@@ -61,15 +62,27 @@ def exercise(case: str) -> None:
             directory.mkdir()
         (deploy / "compose.yml").write_text("services: {app: {image: placeholder}}\n")
         (deploy / "deployment.env").write_text("RITUTILS_PRIVATE_DIR=/private-placeholder\n")
+        pull_errors = {
+            "failed-pull": ("unexpected registry error", "registry request failed"),
+            "rate-limited-pull": ("toomanyrequests: pull rate limit", "registry rate limit"),
+            "unauthorized-pull": ("unauthorized: authentication required", "registry authorization failed"),
+            "timeout-pull": ("context deadline exceeded", "registry request timed out"),
+            "dns-pull": ("no such host", "registry DNS lookup failed"),
+        }
         daemon = {
             "actual": OLD,
             "candidate": NEW,
-            "pull_ok": case != "failed-pull",
+            "pull_ok": case not in pull_errors,
+            "pull_error": (
+                (pull_errors[case][0] + " https://registry.example/image?token=synthetic-secret") if case in pull_errors else ""
+            ),
             "fail_new": case == "health-failure",
             "available": [OLD, NEW, MANUAL],
             "calls": [],
             "deployments": [],
         }
+        if case == "unchanged":
+            daemon["candidate"] = OLD
         if case in {"pending-recovery", "pending-missing-app"}:
             daemon["actual"] = NEW if case == "pending-recovery" else ""
             (state / "last-good").write_text(OLD + "\n")
@@ -99,6 +112,11 @@ def exercise(case: str) -> None:
 
         actual = json.loads(daemon_file.read_text())
         assert result.returncode == 0, (case, result.stdout, result.stderr)
+        lines = result.stdout.splitlines()
+        assert lines and all(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z .+", line) for line in lines)
+        assert "updater started. Poll interval: 300 seconds." in lines[0]
+        assert "Checking Pi channel proshanti/rit-utils:pi." in result.stdout
+        assert "synthetic-secret" not in result.stdout + result.stderr
         assert all(not any(word in call for word in ("down", "prune", "rm")) for call in actual["calls"])
         if case == "success":
             assert actual["deployments"] == [NEW]
@@ -123,11 +141,20 @@ def exercise(case: str) -> None:
             assert not actual["deployments"]
             assert actual["actual"] == OLD
             assert (state / "last-good").read_text().strip() == OLD
+        if case in pull_errors:
+            assert f"Pi channel pull failed ({pull_errors[case][1]}; exit 1); current app is unchanged." in result.stdout
+        if case == "unchanged":
+            assert "Pi channel is current; app is healthy." in result.stdout
 
 
 if __name__ == "__main__":
     cases = (
         "failed-pull",
+        "rate-limited-pull",
+        "unauthorized-pull",
+        "timeout-pull",
+        "dns-pull",
+        "unchanged",
         "success",
         "health-failure",
         "pending-recovery",
