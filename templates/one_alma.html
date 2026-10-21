@@ -6,8 +6,8 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css">
-    <script src="/static/one_alma.js" defer></script>
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=showcase-1">
+    <script src="/static/one_alma.js?v=showcase-1" defer></script>
 </head>
 <body class="inventory-page">
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
@@ -23,10 +23,9 @@
             <div class="stat-card"><p>Продано товаров</p><strong id="sold-count">{{ inventory.sold }}</strong><span>штук</span></div>
             <div class="stat-card"><p>В наличии всего</p><strong id="available-count">{{ inventory.available }}</strong><span>штук</span></div>
         </section>
-        <section class="inventory-panel inventory-finance" aria-labelledby="finance-heading">
-            <h2 id="finance-heading">Денежные итоги</h2>
-            <p class="inventory-help">Стоимость товаров по ценам исходной таблицы.</p>
-            <div class="inventory-scroll" tabindex="0" aria-label="Денежные итоги">
+        <details class="inventory-panel inventory-finance">
+            <summary>Расчёт</summary>
+            <div class="inventory-scroll" tabindex="0" aria-label="Расчёт">
                 <table class="finance-table">
                     <thead><tr><th scope="col">База расчёта</th><th scope="col">Все товары, ₽</th><th scope="col">Продано, ₽</th><th scope="col">В наличии, ₽</th></tr></thead>
                     <tbody>
@@ -41,7 +40,7 @@
                     </tbody>
                 </table>
             </div>
-        </section>
+        </details>
         <div class="inventory-actions">
             <a class="download-pdf" href="/one_alma/pdf" download="one_alma.pdf">Скачать PDF</a>
             <button type="button" id="add-product">Добавить товар</button>
@@ -49,6 +48,7 @@
         </div>
         <section class="inventory-panel" aria-label="Товары">
             <div class="table-toolbar">
+                <span class="showcase-summary">На витрине: <span id="showcase-count">{{ inventory.showcase_quantity }}</span> шт. · позиций: <span id="showcase-products">{{ inventory.showcased_products }}</span></span>
                 <span id="selection-count">Выбрано: 0</span>
                 <button type="button" id="delete-selected" class="secondary-button" disabled>Удалить выбранные</button>
             </div>
@@ -59,25 +59,20 @@
                     <thead><tr>
                         <th scope="col" class="selection-cell"><input type="checkbox" id="select-all" aria-label="Выбрать все товары"></th>
                         {% for column in columns %}<th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="{{ loop.index0 }}">{{ column }} <span aria-hidden="true">↕</span></button></th>{% endfor %}
+                        <th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="9">Витрина <span aria-hidden="true">↕</span></button></th>
                         <th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="8">Продано <span aria-hidden="true">↕</span></button></th>
                         <th scope="col">Действия</th>
                     </tr></thead>
                     <tbody>
                         {% for product in inventory.products %}
-                        <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" class="{% if product.available == 0 %}sold-out{% endif %}">
+                        <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" data-showcase="{{ product.showcase_quantity }}" data-unit-ids="{{ product.units | map(attribute='id') | list | tojson | forceescape }}" class="{% if product.available == 0 %}sold-out{% endif %}">
                             <td class="selection-cell"><input type="checkbox" class="select-product" value="{{ product.id }}" aria-label="Выбрать {{ product.cells[2] }}"></td>
                             {% for cell in product.cells %}<td>{{ cell }}</td>{% endfor %}
+                            <td class="showcase-cell">
+                                <button type="button" class="count-badge showcase-badge {% if product.showcase_quantity == 0 %}empty{% endif %}" data-count-kind="showcase" aria-label="Настроить витрину: {{ product.cells[1] }}" {% if product.available == 0 %}disabled{% endif %}>{% if product.showcase_quantity %}✓ {{ product.showcase_quantity }} шт.{% else %}+ Выставить{% endif %}</button>
+                            </td>
                             <td class="sale-cell">
-                                <div class="unit-controls">
-                                    {% for unit in product.units %}
-                                    <label class="unit-label">
-                                        <input type="checkbox" data-unit-id="{{ unit.id }}" {% if unit.sold %}checked{% endif %}
-                                            aria-label="{{ product.cells[2] }}, штука {{ unit.number }}: продано">
-                                        <span>Штука {{ unit.number }}</span>
-                                    </label>
-                                    {% endfor %}
-                                </div>
-                                <span class="row-sold">Продано: {{ product.sold_count }} из {{ product.units | length }}</span>
+                                <button type="button" class="count-badge sold-badge {% if product.sold_count == 0 %}empty{% endif %}" data-count-kind="sold" aria-label="Настроить продажи: {{ product.cells[1] }}"><span class="count-text">{{ product.sold_count }} из {{ product.units | length }}</span><span class="badge-arrow" aria-hidden="true">⌄</span></button>
                                 <span class="row-available">В наличии: {{ product.available }}</span>
                             </td>
                             <td class="row-actions">
@@ -91,6 +86,17 @@
             </div>
             <p class="inventory-note">Цены за 1 штуку. Цена по ЦБ РФ — на 27.05.2026. Данные: прайс Emansi.</p>
         </section>
+        <aside id="count-editor" class="count-editor" role="dialog" aria-labelledby="count-editor-title" hidden>
+            <form id="count-form">
+                <button type="button" class="count-close" id="count-close" aria-label="Закрыть настройку количества">×</button>
+                <h3 id="count-editor-title">Количество</h3>
+                <p id="count-context"></p>
+                <div class="count-control"><label for="count-quantity">Количество, шт.</label><div class="count-stepper"><button type="button" id="count-minus" aria-label="Уменьшить количество на одну штуку">−</button><input id="count-quantity" type="number" min="0" max="1000" step="1" value="0" required><button type="button" id="count-plus" aria-label="Увеличить количество на одну штуку">+</button></div></div>
+                <p id="count-remaining" class="count-remaining" hidden></p>
+                <p id="count-error" class="count-error" role="alert"></p>
+                <button type="submit" id="count-save">Сохранить</button>
+            </form>
+        </aside>
         <dialog id="product-dialog" class="inventory-dialog">
             <form id="product-form">
                 <div class="dialog-heading"><h2 id="product-dialog-title">Добавить товар</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
@@ -119,6 +125,7 @@
                     <li>Годен до: <strong>09.2028</strong>. Цены: <strong>1343,43</strong> или <strong>1343.43</strong>, без ₽.</li>
                     <li>Пустая цена означает, что цена неизвестна; при обновлении она очистит прежнюю цену. Артикулы с начальным нулём храните как текст.</li>
                     <li>Количество — общее число штук, включая проданные. Оно заменит текущее количество; отметки продаж сохранятся. Указать меньше уже проданного нельзя. Без этой колонки количество будет 2.</li>
+                    <li>Витрина не загружается из Excel: у новых позиций 0, ручное количество существующих сохраняется в пределах остатка. При уменьшении остатка витрина не может превышать его.</li>
                     <li>Поддерживается и исходная таблица Emansi с её заголовками. При ошибке импорт целиком отменяется.</li>
                 </ul>
                 <label for="import-file">Excel с товарами, до 5 МБ</label>

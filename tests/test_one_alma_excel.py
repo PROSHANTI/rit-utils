@@ -55,6 +55,16 @@ def test_quantity_defaults_to_two_when_column_missing():
     assert products[0].quantity == 2
 
 
+def test_showcase_columns_are_never_read_from_excel():
+    row = [26, "0001", "Крем", "50 мл", "09.2028", 100, 200, 300, 3]
+    content = excel_bytes([row + [99, "=1+1", -5]], HEADERS + ["Витрина", "showcase_quantity", "На витрине"])
+
+    products = ExcelProductImporter().parse(content, "products.xlsx")
+
+    assert len(products) == 1 and products[0].quantity == 3
+    assert products[0].to_cells() == ("26", "0001", "Крем", "50 мл", "09.2028", "100,00", "200,00", "300,00")
+
+
 @pytest.mark.parametrize(
     "row",
     [

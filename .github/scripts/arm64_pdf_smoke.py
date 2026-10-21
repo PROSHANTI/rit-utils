@@ -127,6 +127,11 @@ with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
     inventory = inventory_repository.set_sold(inventory.products[0].units[1].id, True)
     assert (inventory.sold, inventory.available) == (1, 49)
     assert InventoryRepository(database).snapshot().sold == 1
+    inventory = inventory_repository.set_showcase_quantity(inventory.products[0].id, 1)
+    assert InventoryRepository(database).snapshot().showcase_quantity == 1
+    inventory = inventory_repository.set_sold_count(inventory.products[0].id, 2)
+    assert (inventory.sold, inventory.available, inventory.showcase_quantity) == (2, 48, 0)
+    assert len(inventory.products) == 25
     inventory_pdf = InventoryPdfExporter().export(inventory)
     assert inventory_pdf.startswith(b"%PDF-") and len(inventory_pdf) > 2000
     baseline["one_alma_pdf_bytes"] = len(inventory_pdf)

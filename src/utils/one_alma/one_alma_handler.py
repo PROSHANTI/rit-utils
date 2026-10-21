@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .excel_import import ExcelProductImporter
-from .models import COLUMNS, NewProduct
+from .models import COLUMNS, Inventory, NewProduct
 from .pdf_export import InventoryPdfExporter
 from .repository import InventoryRepository
 
@@ -47,11 +47,35 @@ class OneAlmaHandler:
         except sqlite3.Error:
             logger.exception("Не удалось сохранить отметку продажи OneAlma")
             raise HTTPException(status_code=503, detail="Не удалось сохранить продажу. Попробуйте позже.") from None
+        return self._inventory_response(inventory)
+
+    def set_product_count(
+        self, request: Request, product_id: int, quantity: int, csrf_token: str, *, showcase: bool = False
+    ) -> Response:
+        self._check_csrf(request, csrf_token)
+        try:
+            if showcase:
+                inventory = self.repository.set_showcase_quantity(product_id, quantity)
+            else:
+                inventory = self.repository.set_sold_count(product_id, quantity)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except sqlite3.Error:
+            logger.exception("Не удалось сохранить количество OneAlma: позиция %s", product_id)
+            raise HTTPException(status_code=503, detail="Не удалось сохранить количество. Попробуйте позже.") from None
+        return self._inventory_response(inventory)
+
+    @staticmethod
+    def _inventory_response(inventory: Inventory) -> JSONResponse:
         return JSONResponse(
             {
                 "total": inventory.total,
                 "sold": inventory.sold,
                 "available": inventory.available,
+                "showcase_quantity": inventory.showcase_quantity,
+                "showcased_products": inventory.showcased_products,
                 "valuations": [
                     {"amounts": valuation.amounts, "unpriced": valuation.unpriced} for valuation in inventory.valuations
                 ],
@@ -61,6 +85,7 @@ class OneAlmaHandler:
                         "cells": product.cells,
                         "sold": product.sold_count,
                         "available": product.available,
+                        "showcase_quantity": product.showcase_quantity,
                         "units": [{"id": unit.id, "sold": unit.sold} for unit in product.units],
                     }
                     for product in inventory.products

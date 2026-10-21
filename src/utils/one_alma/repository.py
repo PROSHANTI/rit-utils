@@ -22,12 +22,63 @@ class InventoryRepository:
 
     def set_sold(self, unit_id: int, sold: bool) -> Inventory:
         with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute("UPDATE product_units SET sold = ? WHERE id = ?", (int(sold), unit_id))
             if cursor.rowcount == 0:
                 raise LookupError("Товар не найден")
+            product_id = connection.execute("SELECT product_id FROM product_units WHERE id=?", (unit_id,)).fetchone()[0]
+            self._clamp_showcase(connection, product_id)
             inventory = self._snapshot(connection)
         logger.info("Отметка продажи сохранена: единица %s, продано %s", unit_id, sold)
         return inventory
+
+    def set_sold_count(self, product_id: int, quantity: int) -> Inventory:
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            units = connection.execute(
+                "SELECT id, sold FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
+            ).fetchall()
+            if not units:
+                raise LookupError("Товар не найден")
+            self._validate_count(quantity, len(units))
+            delta = quantity - sum(unit["sold"] for unit in units)
+            candidates = (
+                [unit for unit in units if not unit["sold"]] if delta > 0 else [unit for unit in reversed(units) if unit["sold"]]
+            )
+            connection.executemany(
+                "UPDATE product_units SET sold=? WHERE id=?", [(int(delta > 0), unit["id"]) for unit in candidates[: abs(delta)]]
+            )
+            self._clamp_showcase(connection, product_id)
+            inventory = self._snapshot(connection)
+        logger.info("Количество продаж OneAlma сохранено: позиция %s, продано %s", product_id, quantity)
+        return inventory
+
+    def set_showcase_quantity(self, product_id: int, quantity: int) -> Inventory:
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute("SELECT 1 FROM products WHERE id=?", (product_id,)).fetchone():
+                raise LookupError("Товар не найден")
+            available = connection.execute(
+                "SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0", (product_id,)
+            ).fetchone()[0]
+            self._validate_count(quantity, available)
+            connection.execute("UPDATE products SET showcase_quantity=? WHERE id=?", (quantity, product_id))
+            inventory = self._snapshot(connection)
+        logger.info("Витрина OneAlma сохранена: позиция %s, количество %s", product_id, quantity)
+        return inventory
+
+    @staticmethod
+    def _validate_count(quantity: int, maximum: int) -> None:
+        if type(quantity) is not int or not 0 <= quantity <= maximum:
+            raise ValueError(f"Укажите целое количество от 0 до {maximum}.")
+
+    @staticmethod
+    def _clamp_showcase(connection: sqlite3.Connection, product_id: int) -> None:
+        connection.execute(
+            """UPDATE products SET showcase_quantity=MIN(showcase_quantity,
+               (SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0)) WHERE id=?""",
+            (product_id, product_id),
+        )
 
     def add_product(self, product: NewProduct) -> None:
         cells = product.to_cells()
@@ -109,7 +160,8 @@ class InventoryRepository:
                 expiry TEXT NOT NULL,
                 central_bank_price TEXT NOT NULL,
                 wholesale_price TEXT NOT NULL,
-                market_price TEXT NOT NULL
+                market_price TEXT NOT NULL,
+                showcase_quantity INTEGER NOT NULL DEFAULT 0 CHECK (showcase_quantity >= 0)
             );
             CREATE TABLE IF NOT EXISTS product_units (
                 id INTEGER PRIMARY KEY,
@@ -123,6 +175,11 @@ class InventoryRepository:
         # Serialize the first import across concurrent requests/processes.
         with connection:
             connection.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(products)")}
+            if "showcase_quantity" not in columns:
+                connection.execute(
+                    "ALTER TABLE products ADD COLUMN showcase_quantity INTEGER NOT NULL DEFAULT 0 CHECK (showcase_quantity >= 0)"
+                )
             if connection.execute("SELECT 1 FROM inventory_metadata WHERE key = 'seed_version'").fetchone():
                 InventoryRepository._initialize_sequences(connection)
                 return
@@ -199,6 +256,7 @@ class InventoryRepository:
             )
         elif quantity > len(units):
             cls._insert_units(connection, product_id, len(units) + 1, quantity)
+        cls._clamp_showcase(connection, product_id)
 
     @staticmethod
     def _snapshot(connection: sqlite3.Connection) -> Inventory:
@@ -207,8 +265,10 @@ class InventoryRepository:
                ORDER BY p.id, u.number""").fetchall()
         cells: dict[int, tuple[str, ...]] = {}
         units: dict[int, list[ProductUnit]] = {}
+        showcase: dict[int, int] = {}
         for row in rows:
             product_id = row["id"]
+            showcase[product_id] = row["showcase_quantity"]
             cells[product_id] = tuple(
                 row[key]
                 for key in (
@@ -223,4 +283,9 @@ class InventoryRepository:
                 )
             )
             units.setdefault(product_id, []).append(ProductUnit(row["unit_id"], row["unit_number"], bool(row["sold"])))
-        return Inventory(tuple(Product(product_id, values, tuple(units[product_id])) for product_id, values in cells.items()))
+        return Inventory(
+            tuple(
+                Product(product_id, values, tuple(units[product_id]), showcase[product_id])
+                for product_id, values in cells.items()
+            )
+        )

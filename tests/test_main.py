@@ -58,6 +58,8 @@ class TestApplicationRoutes:
             ("/remove_bg", "POST"),
             ("/one_alma", "GET"),
             ("/one_alma/units/{unit_id}", "POST"),
+            ("/one_alma/products/{product_id}/sold", "POST"),
+            ("/one_alma/products/{product_id}/showcase", "POST"),
             ("/one_alma/pdf", "GET"),
             ("/one_alma/products", "POST"),
             ("/one_alma/products/{product_id}", "PUT"),
@@ -65,8 +67,8 @@ class TestApplicationRoutes:
             ("/one_alma/import", "POST"),
         }
 
-        assert len(router_routes) == 20
-        assert len(application_routes) == 20
+        assert len(router_routes) == 22
+        assert len(application_routes) == 22
         assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
         assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 
@@ -95,6 +97,8 @@ class TestApplicationRoutes:
             pytest.param("/remove_bg", "POST", 1, id="image-post-protected"),
             pytest.param("/one_alma", "GET", 1, id="inventory-protected"),
             pytest.param("/one_alma/units/{unit_id}", "POST", 1, id="inventory-sales-protected"),
+            pytest.param("/one_alma/products/{product_id}/sold", "POST", 1, id="inventory-sold-count-protected"),
+            pytest.param("/one_alma/products/{product_id}/showcase", "POST", 1, id="inventory-showcase-protected"),
             pytest.param("/one_alma/pdf", "GET", 1, id="inventory-pdf-protected"),
             pytest.param("/one_alma/products", "POST", 1, id="inventory-create-protected"),
             pytest.param("/one_alma/products/{product_id}", "PUT", 1, id="inventory-update-protected"),
