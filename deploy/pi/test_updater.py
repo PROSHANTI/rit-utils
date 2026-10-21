@@ -81,7 +81,7 @@ def exercise(case: str) -> None:
             "calls": [],
             "deployments": [],
         }
-        if case == "unchanged":
+        if case in {"unchanged", "utc-logs"}:
             daemon["candidate"] = OLD
         if case in {"pending-recovery", "pending-missing-app"}:
             daemon["actual"] = NEW if case == "pending-recovery" else ""
@@ -107,13 +107,18 @@ def exercise(case: str) -> None:
             "FAKE_DOCKER_STATE": str(daemon_file),
             "STABLE_SECONDS": "0",
         }
+        if case == "utc-logs":
+            environment["TZ"] = "UTC"
 
         result = subprocess.run(["/bin/sh", str(SCRIPT), "--once"], env=environment, capture_output=True, text=True, timeout=20)
 
         actual = json.loads(daemon_file.read_text())
         assert result.returncode == 0, (case, result.stdout, result.stderr)
         lines = result.stdout.splitlines()
-        assert lines and all(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z .+", line) for line in lines)
+        offset = "+0000" if case == "utc-logs" else "+0300"
+        assert lines and all(
+            re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}" + re.escape(offset) + r" .+", line) for line in lines
+        )
         assert "updater started. Poll interval: 300 seconds." in lines[0]
         assert "Checking Pi channel proshanti/rit-utils:pi." in result.stdout
         assert "synthetic-secret" not in result.stdout + result.stderr
@@ -143,7 +148,7 @@ def exercise(case: str) -> None:
             assert (state / "last-good").read_text().strip() == OLD
         if case in pull_errors:
             assert f"Pi channel pull failed ({pull_errors[case][1]}; exit 1); current app is unchanged." in result.stdout
-        if case == "unchanged":
+        if case in {"unchanged", "utc-logs"}:
             assert "Pi channel is current; app is healthy." in result.stdout
 
 
@@ -155,6 +160,7 @@ if __name__ == "__main__":
         "timeout-pull",
         "dns-pull",
         "unchanged",
+        "utc-logs",
         "success",
         "health-failure",
         "pending-recovery",

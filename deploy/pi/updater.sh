@@ -14,10 +14,12 @@ STATE_DIR=${STATE_DIR:-/state}
 POLL_SECONDS=${POLL_SECONDS:-300}
 WAIT_SECONDS=${WAIT_SECONDS:-180}
 STABLE_SECONDS=${STABLE_SECONDS:-20}
+TZ=${TZ:-Europe/Moscow}
+export TZ
 export DOCKER_HOST=unix:///var/run/docker.sock
 unset DOCKER_CONTEXT DOCKER_API_VERSION
 
-log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
+log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"; }
 atomic_write() {
     path=$1
     shift
@@ -190,7 +192,7 @@ exec 9>"$STATE_DIR/controller.lock"
 flock -n 9 || { log 'Another rit-utils updater owns the state'; exit 1; }
 docker version >/dev/null 2>&1 || { log 'Docker API/socket check failed'; exit 1; }
 docker compose version >/dev/null 2>&1 || { log 'Docker Compose unavailable'; exit 1; }
-log "RIT Utils Pi updater started. Poll interval: $POLL_SECONDS seconds."
+log "RIT Utils Pi updater started. Poll interval: $POLL_SECONDS seconds. Timezone: $TZ."
 if [ "${1:-}" = --once ]; then
     poll_once
 else
