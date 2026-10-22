@@ -6,8 +6,8 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=showcase-1">
-    <script src="/static/one_alma.js?v=showcase-1" defer></script>
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=showcase-2">
+    <script src="/static/one_alma.js?v=showcase-2" defer></script>
 </head>
 <body class="inventory-page">
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
@@ -73,7 +73,6 @@
                             </td>
                             <td class="sale-cell">
                                 <button type="button" class="count-badge sold-badge {% if product.sold_count == 0 %}empty{% endif %}" data-count-kind="sold" aria-label="Настроить продажи: {{ product.cells[1] }}"><span class="count-text">{{ product.sold_count }} из {{ product.units | length }}</span><span class="badge-arrow" aria-hidden="true">⌄</span></button>
-                                <span class="row-available">В наличии: {{ product.available }}</span>
                             </td>
                             <td class="row-actions">
                                 <button type="button" class="icon-button edit-product" title="Редактировать товар" aria-label="Редактировать {{ product.cells[2] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6 12-12Zm-1 2 5 5M4 15l5 5"/></svg></button>

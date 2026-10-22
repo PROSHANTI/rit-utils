@@ -191,7 +191,6 @@
             const soldButton = row.querySelector('[data-count-kind="sold"]');
             soldButton.querySelector('.count-text').textContent = `${product.sold} из ${product.units.length}`;
             soldButton.classList.toggle('empty', product.sold === 0);
-            row.querySelector('.row-available').textContent = `В наличии: ${product.available}`;
             const showcaseButton = row.querySelector('[data-count-kind="showcase"]');
             showcaseButton.classList.toggle('empty', product.showcase_quantity === 0);
             showcaseButton.textContent = product.showcase_quantity > 0 ? `✓ ${product.showcase_quantity} шт.` : '+ Выставить';
