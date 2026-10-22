@@ -132,10 +132,23 @@ with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
     inventory = inventory_repository.set_sold_count(inventory.products[0].id, 2)
     assert (inventory.sold, inventory.available, inventory.showcase_quantity) == (2, 48, 0)
     assert len(inventory.products) == 25
+    second_product = inventory.products[1]
+    inventory_repository.set_showcase_quantity(second_product.id, 1)
+    request_id = "00000000-0000-4000-8000-000000000001"
+    recorded = inventory_repository.record_sale(second_product.id, 1, "ARM64 smoke", "79,99", request_id)
+    sale = recorded.sales[-1]
+    assert sale.price_cents == 7999 and recorded.sold == 3
+    assert InventoryRepository(database).snapshot().sales[-1] == sale
+    assert inventory_repository.record_sale(second_product.id, 1, "ARM64 smoke", "79,99", request_id) == recorded
+    inventory = inventory_repository.cancel_sale(sale.id)
+    assert inventory.sold == 2 and inventory.showcase_quantity == 1
+    assert inventory.history[0].description == f"Отмена продажи #{sale.id}"
+    assert InventoryRepository(database).snapshot() == inventory
     inventory_pdf = InventoryPdfExporter().export(inventory)
     assert inventory_pdf.startswith(b"%PDF-") and len(inventory_pdf) > 2000
     baseline["one_alma_pdf_bytes"] = len(inventory_pdf)
     baseline["one_alma_sqlite_persistence_ok"] = True
+    baseline["one_alma_sales_history_ok"] = True
 
 Path("/tmp/arm64-runtime-baseline.json").write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n")
 if response.background is not None:

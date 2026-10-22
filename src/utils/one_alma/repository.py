@@ -4,11 +4,15 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
-from .models import ImportResult, Inventory, NewProduct, Product, ProductUnit
+from .models import HistoryEntry, ImportResult, Inventory, NewProduct, Product, ProductUnit, Sale, format_cents
 
 logger = logging.getLogger(__name__)
+CELL_KEYS = ("position", "article", "name", "volume", "expiry", "central_bank_price", "wholesale_price", "market_price")
 
 
 class InventoryRepository:
@@ -18,11 +22,95 @@ class InventoryRepository:
 
     def snapshot(self) -> Inventory:
         with self._connection() as connection:
+            connection.execute("BEGIN")
             return self._snapshot(connection)
+
+    def record_sale(self, product_id: int, quantity: int, customer: str, unit_price: str, request_id: str) -> Inventory:
+        if type(quantity) is not int or not 1 <= quantity <= 1000:
+            raise ValueError("Укажите целое количество от 1 до 1000.")
+        customer = customer.strip()
+        if len(customer) > 200:
+            raise ValueError("В поле «Кому» можно ввести до 200 символов.")
+        normalized = NewProduct._format_price(unit_price)
+        price = None if normalized == "—" else int(Decimal(normalized.replace(",", ".")) * 100)
+        try:
+            request_id = str(UUID(request_id))
+        except ValueError:
+            raise ValueError("Обновите окно продажи и повторите действие.") from None
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute("SELECT * FROM one_alma_sales WHERE request_id=?", (request_id,)).fetchone()
+            if previous:
+                if (previous["product_id"], previous["quantity"], previous["customer"], previous["price_cents"]) != (
+                    product_id,
+                    quantity,
+                    customer,
+                    price,
+                ):
+                    raise ValueError("Этот запрос уже использован. Откройте новую продажу.")
+                return self._snapshot(connection)
+            cells = self._product_cells(connection, product_id)
+            available = connection.execute(
+                "SELECT id FROM product_units WHERE product_id=? AND sold=0 ORDER BY number", (product_id,)
+            ).fetchall()
+            if quantity > len(available):
+                raise ValueError(f"Можно продать не больше {len(available)} шт. Обновите остаток.")
+            created_at = datetime.now(UTC).isoformat()
+            cursor = connection.execute(
+                """INSERT INTO one_alma_sales(product_id,cells_json,customer,quantity,price_cents,created_at,request_id)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (product_id, json.dumps(cells, ensure_ascii=False), customer, quantity, price, created_at, request_id),
+            )
+            sale_id = cursor.lastrowid
+            unit_ids = [row["id"] for row in available[:quantity]]
+            connection.executemany("UPDATE product_units SET sold=1 WHERE id=?", [(unit_id,) for unit_id in unit_ids])
+            connection.executemany(
+                "INSERT INTO one_alma_sale_units(sale_id,unit_id) VALUES (?,?)", [(sale_id, unit_id) for unit_id in unit_ids]
+            )
+            self._clamp_showcase(connection, product_id)
+            self._event(connection, product_id, "sale", {}, cells=cells, sale_id=sale_id, created_at=created_at)
+            inventory = self._snapshot(connection)
+        logger.info("Оформлена продажа OneAlma: %s, позиция %s, количество %s", sale_id, product_id, quantity)
+        return inventory
+
+    def cancel_sale(self, sale_id: int) -> Inventory:
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            sale = connection.execute("SELECT * FROM one_alma_sales WHERE id=?", (sale_id,)).fetchone()
+            if sale is None:
+                raise LookupError("Продажа не найдена.")
+            if sale["cancelled_at"] is not None:
+                raise ValueError("Эта продажа уже отменена.")
+            units = connection.execute(
+                """SELECT u.id,u.sold,u.product_id FROM one_alma_sale_units s
+                   JOIN product_units u ON u.id=s.unit_id WHERE s.sale_id=?""",
+                (sale_id,),
+            ).fetchall()
+            if len(units) != sale["quantity"] or any(
+                not unit["sold"] or unit["product_id"] != sale["product_id"] for unit in units
+            ):
+                raise ValueError("Товар удалён или остаток изменился. Не удалось отменить продажу.")
+            cancelled_at = datetime.now(UTC).isoformat()
+            connection.executemany("UPDATE product_units SET sold=0 WHERE id=?", [(unit["id"],) for unit in units])
+            connection.execute("UPDATE one_alma_sales SET cancelled_at=? WHERE id=?", (cancelled_at, sale_id))
+            self._event(
+                connection,
+                sale["product_id"],
+                "cancel",
+                {},
+                cells=tuple(json.loads(sale["cells_json"])),
+                sale_id=sale_id,
+                created_at=cancelled_at,
+            )
+            inventory = self._snapshot(connection)
+        logger.info("Отменена продажа OneAlma: %s", sale_id)
+        return inventory
 
     def set_sold(self, unit_id: int, sold: bool) -> Inventory:
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
+            if not sold and self._managed_units(connection, [unit_id]):
+                raise ValueError("Отмените эту продажу через историю товара.")
             cursor = connection.execute("UPDATE product_units SET sold = ? WHERE id = ?", (int(sold), unit_id))
             if cursor.rowcount == 0:
                 raise LookupError("Товар не найден")
@@ -41,9 +129,14 @@ class InventoryRepository:
             if not units:
                 raise LookupError("Товар не найден")
             self._validate_count(quantity, len(units))
+            managed = self._managed_units(connection, [unit["id"] for unit in units])
+            if quantity < len(managed):
+                raise ValueError("Отмените оформленные продажи через историю товара.")
             delta = quantity - sum(unit["sold"] for unit in units)
             candidates = (
-                [unit for unit in units if not unit["sold"]] if delta > 0 else [unit for unit in reversed(units) if unit["sold"]]
+                [unit for unit in units if not unit["sold"]]
+                if delta > 0
+                else [unit for unit in reversed(units) if unit["sold"] and unit["id"] not in managed]
             )
             connection.executemany(
                 "UPDATE product_units SET sold=? WHERE id=?", [(int(delta > 0), unit["id"]) for unit in candidates[: abs(delta)]]
@@ -62,10 +155,51 @@ class InventoryRepository:
                 "SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0", (product_id,)
             ).fetchone()[0]
             self._validate_count(quantity, available)
+            before = connection.execute("SELECT showcase_quantity FROM products WHERE id=?", (product_id,)).fetchone()[0]
             connection.execute("UPDATE products SET showcase_quantity=? WHERE id=?", (quantity, product_id))
+            if before != quantity:
+                self._event(connection, product_id, "showcase", {"description": "Витрина", "quantity": f"{before} → {quantity}"})
             inventory = self._snapshot(connection)
         logger.info("Витрина OneAlma сохранена: позиция %s, количество %s", product_id, quantity)
         return inventory
+
+    @staticmethod
+    def _managed_units(connection: sqlite3.Connection, unit_ids: list[int]) -> set[int]:
+        active = connection.execute(
+            "SELECT u.unit_id FROM one_alma_sale_units u JOIN one_alma_sales s ON s.id=u.sale_id WHERE s.cancelled_at IS NULL"
+        ).fetchall()
+        return {row[0] for row in active}.intersection(unit_ids)
+
+    @staticmethod
+    def _product_cells(connection: sqlite3.Connection, product_id: int) -> tuple[str, ...]:
+        row = connection.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+        if row is None:
+            raise LookupError("Товар не найден.")
+        return tuple(row[key] for key in CELL_KEYS)
+
+    @classmethod
+    def _event(
+        cls,
+        connection: sqlite3.Connection,
+        product_id: int,
+        kind: str,
+        details: dict[str, str],
+        *,
+        cells: tuple[str, ...] | None = None,
+        sale_id: int | None = None,
+        created_at: str | None = None,
+    ) -> None:
+        connection.execute(
+            """INSERT INTO one_alma_history(product_id,cells_json,kind,details_json,sale_id,created_at) VALUES (?,?,?,?,?,?)""",
+            (
+                product_id,
+                json.dumps(cells or cls._product_cells(connection, product_id), ensure_ascii=False),
+                kind,
+                json.dumps(details, ensure_ascii=False),
+                sale_id,
+                created_at or datetime.now(UTC).isoformat(),
+            ),
+        )
 
     @staticmethod
     def _validate_count(quantity: int, maximum: int) -> None:
@@ -84,7 +218,8 @@ class InventoryRepository:
         cells = product.to_cells()
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._insert_product(connection, cells, product.quantity)
+            product_id = self._insert_product(connection, cells, product.quantity)
+            self._event(connection, product_id, "edit", {"description": "Добавлен товар", "quantity": f"0 → {product.quantity}"})
         logger.info("Добавлена позиция OneAlma: %s", " ".join(product.name.split()))
 
     def import_products(self, products: list[NewProduct]) -> ImportResult:
@@ -100,10 +235,16 @@ class InventoryRepository:
             for cells, quantity in prepared:
                 existing = connection.execute("SELECT id FROM products WHERE position=?", (cells[0],)).fetchone()
                 if existing is None:
-                    self._insert_product(connection, cells, quantity)
+                    product_id = self._insert_product(connection, cells, quantity)
+                    self._event(
+                        connection,
+                        product_id,
+                        "import",
+                        {"description": "Добавление из импорта", "quantity": f"0 → {quantity}", "price": cells[5]},
+                    )
                     added += 1
                 else:
-                    self._update_product(connection, existing["id"], cells, quantity)
+                    self._update_product(connection, existing["id"], cells, quantity, event_kind="import")
                     updated += 1
         logger.info("Импорт товаров OneAlma завершён: добавлено %s, обновлено %s", added, updated)
         return ImportResult(added=added, updated=updated)
@@ -128,6 +269,8 @@ class InventoryRepository:
             found = connection.execute(f"SELECT COUNT(*) FROM products WHERE id IN ({placeholders})", ids).fetchone()[0]
             if found != len(ids):
                 raise LookupError("Часть товаров уже удалена. Обновите страницу.")
+            for product_id in ids:
+                self._event(connection, product_id, "delete", {"description": "Удалён товар"})
             connection.execute(f"DELETE FROM product_units WHERE product_id IN ({placeholders})", ids)
             connection.execute(f"DELETE FROM products WHERE id IN ({placeholders})", ids)
         logger.info("Удалены позиции OneAlma: %s", len(ids))
@@ -171,6 +314,33 @@ class InventoryRepository:
                 UNIQUE (product_id, number)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS products_position ON products(position);
+            CREATE TABLE IF NOT EXISTS one_alma_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                cells_json TEXT NOT NULL,
+                customer TEXT NOT NULL,
+                quantity INTEGER NOT NULL CHECK(quantity > 0),
+                price_cents INTEGER CHECK(price_cents >= 0),
+                created_at TEXT NOT NULL,
+                cancelled_at TEXT,
+                request_id TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS one_alma_sale_units (
+                sale_id INTEGER NOT NULL REFERENCES one_alma_sales(id),
+                unit_id INTEGER NOT NULL,
+                PRIMARY KEY(sale_id,unit_id)
+            );
+            CREATE INDEX IF NOT EXISTS one_alma_sale_product ON one_alma_sales(product_id);
+            CREATE TABLE IF NOT EXISTS one_alma_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                cells_json TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                details_json TEXT NOT NULL,
+                sale_id INTEGER REFERENCES one_alma_sales(id),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS one_alma_history_product ON one_alma_history(product_id,id);
             """)
         # Serialize the first import across concurrent requests/processes.
         with connection:
@@ -216,7 +386,7 @@ class InventoryRepository:
         return first
 
     @classmethod
-    def _insert_product(cls, connection: sqlite3.Connection, cells: tuple[str, ...], quantity: int) -> None:
+    def _insert_product(cls, connection: sqlite3.Connection, cells: tuple[str, ...], quantity: int) -> int:
         product_id = cls._reserve_ids(connection, "next_product_id", 1)
         connection.execute(
             """INSERT INTO products
@@ -225,6 +395,7 @@ class InventoryRepository:
             (product_id, *cells),
         )
         cls._insert_units(connection, product_id, 1, quantity)
+        return product_id
 
     @classmethod
     def _insert_units(cls, connection: sqlite3.Connection, product_id: int, start: int, end: int) -> None:
@@ -235,7 +406,10 @@ class InventoryRepository:
         )
 
     @classmethod
-    def _update_product(cls, connection: sqlite3.Connection, product_id: int, cells: tuple[str, ...], quantity: int) -> None:
+    def _update_product(
+        cls, connection: sqlite3.Connection, product_id: int, cells: tuple[str, ...], quantity: int, *, event_kind: str = "edit"
+    ) -> None:
+        previous_cells = cls._product_cells(connection, product_id)
         units = connection.execute("SELECT * FROM product_units WHERE product_id=? ORDER BY number", (product_id,)).fetchall()
         if quantity < sum(unit["sold"] for unit in units):
             raise ValueError(f"№ {cells[0]}: количество не может быть меньше числа уже проданных товаров.")
@@ -257,6 +431,17 @@ class InventoryRepository:
         elif quantity > len(units):
             cls._insert_units(connection, product_id, len(units) + 1, quantity)
         cls._clamp_showcase(connection, product_id)
+        if previous_cells != cells or len(units) != quantity:
+            cls._event(
+                connection,
+                product_id,
+                event_kind,
+                {
+                    "description": "Обновление из импорта" if event_kind == "import" else "Изменён товар",
+                    "quantity": f"{len(units)} → {quantity}",
+                    "price": f"{previous_cells[5]} → {cells[5]}",
+                },
+            )
 
     @staticmethod
     def _snapshot(connection: sqlite3.Connection) -> Inventory:
@@ -283,9 +468,59 @@ class InventoryRepository:
                 )
             )
             units.setdefault(product_id, []).append(ProductUnit(row["unit_id"], row["unit_number"], bool(row["sold"])))
-        return Inventory(
-            tuple(
-                Product(product_id, values, tuple(units[product_id]), showcase[product_id])
-                for product_id, values in cells.items()
-            )
+        products = tuple(
+            Product(product_id, values, tuple(units[product_id]), showcase[product_id]) for product_id, values in cells.items()
         )
+        sales = tuple(
+            Sale(
+                row["id"],
+                row["product_id"],
+                tuple(json.loads(row["cells_json"])),
+                row["customer"],
+                row["quantity"],
+                row["price_cents"],
+                datetime.fromisoformat(row["created_at"]),
+                datetime.fromisoformat(row["cancelled_at"]) if row["cancelled_at"] else None,
+            )
+            for row in connection.execute("SELECT * FROM one_alma_sales ORDER BY id")
+        )
+        sale_by_id = {sale.id: sale for sale in sales}
+        history = []
+        for row in connection.execute("SELECT * FROM one_alma_history ORDER BY id DESC"):
+            details = json.loads(row["details_json"])
+            entry = dict(
+                description=details.get("description", ""),
+                customer="—",
+                quantity=details.get("quantity", "—"),
+                price=details.get("price", "—"),
+                amount="—",
+            )
+            sale = sale_by_id.get(row["sale_id"])
+            cancelled = can_cancel = False
+            if sale is not None:
+                is_cancel = row["kind"] == "cancel"
+                cancelled = is_cancel or sale.cancelled_at is not None
+                can_cancel = not is_cancel and sale.cancelled_at is None and sale.product_id in cells
+                description = f"{'Отмена продажи' if is_cancel else 'Продажа'} #{sale.id}"
+                if not is_cancel and sale.cancelled_at is not None:
+                    description += "\nОтменена"
+                entry = dict(
+                    description=description,
+                    customer=sale.customer or "Не указан",
+                    quantity=f"{'+' if is_cancel else '−'}{sale.quantity}",
+                    price=format_cents(sale.price_cents),
+                    amount=("−" if is_cancel and sale.amount_cents is not None else "") + format_cents(sale.amount_cents),
+                )
+            history.append(
+                HistoryEntry(
+                    row["id"],
+                    row["product_id"],
+                    datetime.fromisoformat(row["created_at"]),
+                    tuple(json.loads(row["cells_json"])),
+                    **entry,
+                    sale_id=row["sale_id"],
+                    cancelled=cancelled,
+                    can_cancel=can_cancel,
+                )
+            )
+        return Inventory(products, sales, tuple(history))

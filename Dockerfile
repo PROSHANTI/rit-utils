@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     libreoffice \
     fonts-liberation \
     fonts-dejavu-core \
+    tzdata \
     locales \
     && rm -rf /var/lib/apt/lists/*
 

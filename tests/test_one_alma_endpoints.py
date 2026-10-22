@@ -63,11 +63,13 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert "Учет OneAlma" in home and "Учет продажи товаров" in home
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert html.count('data-count-kind="sold"') == html.count('data-count-kind="showcase"') == 25
+    assert html.count('data-count-kind="sold"') == 0
+    assert html.count('data-count-kind="showcase"') == 25
+    assert html.count('class="icon-button record-sale"') == html.count('class="icon-button product-history"') == 25
     assert "Штука 1" not in html and "data-unit-id=" not in html
     assert '<span class="count-text">0 из 2</span>' in html
     assert 'class="row-available"' not in html
-    assert "+ Выставить" in html and 'id="count-plus"' in html and 'id="count-minus"' in html
+    assert "+ Выставить" not in html and 'id="count-plus"' in html and 'id="count-minus"' in html
     assert "Денежные итоги" not in html and "Поле необязательное" not in html and "из оставшихся штук" not in html
     assert "Стоимость товаров по ценам исходной таблицы." not in html
     assert "Выставлено ·" not in html and "Не выставлено" not in html
