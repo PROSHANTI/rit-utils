@@ -66,6 +66,7 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert html.count('data-count-kind="sold"') == html.count('data-count-kind="showcase"') == 25
     assert "Штука 1" not in html and "data-unit-id=" not in html
     assert '<span class="count-text">0 из 2</span>' in html
+    assert 'class="row-available"' not in html
     assert "+ Выставить" in html and 'id="count-plus"' in html and 'id="count-minus"' in html
     assert "Денежные итоги" not in html and "Поле необязательное" not in html and "из оставшихся штук" not in html
     assert "Стоимость товаров по ценам исходной таблицы." not in html

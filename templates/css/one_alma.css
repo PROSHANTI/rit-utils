@@ -35,11 +35,10 @@
 .inventory-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, .025); }
 .inventory-table tbody tr:hover { background: rgba(255, 65, 108, .065); }
 .inventory-table tr.sold-out td:not(.sale-cell) { color: #999; }
-.row-available { display: block; margin-top: 6px; color: #bbb; white-space: nowrap; font-size: .8rem; }
 .showcase-summary { color: #b6edcc; margin-right: auto; }
 .table-toolbar { flex-wrap: wrap; }
 .showcase-cell, .sale-cell { white-space: nowrap; }
-.count-badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-height: 36px; margin: 0; padding: 8px 11px; border-radius: 7px; border: 1px solid #875064; background: #442432; color: #ffd3e0; font-size: .8rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.count-badge { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; gap: 6px; width: auto; height: 36px; margin: 0; padding: 8px 11px; border-radius: 7px; border: 1px solid #875064; background: #442432; color: #ffd3e0; font-size: .8rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .showcase-badge { background: #243b30; border-color: #536f60; color: #b6edcc; }
 .count-badge.empty { border-color: #674858; color: #c3aeb9; background: #2d2029; }
 .count-badge:hover { transform: none; box-shadow: none; filter: brightness(1.12); }
@@ -74,7 +73,7 @@ button:disabled { opacity: .5; cursor: default; }
 .selection-cell { width: 44px; }
 .selection-cell input { width: 20px; height: 20px; padding: 0; accent-color: #ff416c; cursor: pointer; }
 .row-actions { white-space: nowrap; }
-.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin: 0; padding: 6px; background: #352329; border: 1px solid #674049; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; width: 36px; height: 36px; margin: 0; padding: 6px; background: #352329; border: 1px solid #674049; }
 .icon-button svg { width: 20px; height: 20px; fill: none; stroke: white; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .sort-button { width: auto; margin: 0; padding: 0; background: none; border-radius: 0; font: inherit; text-align: left; display: inline-flex; gap: 6px; align-items: center; }
 .sort-button:hover { transform: none; box-shadow: none; color: #ffc2ce; }
