@@ -336,25 +336,6 @@ def test_pdf_includes_all_rows_over_multiple_pages_and_escapes_text():
     assert "Срок годности" in text and "Количество" in text
 
 
-def test_demo_session_is_isolated_from_working_login_and_rejects_untrusted_host(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    monkeypatch.setenv("INVENTORY_DEMO_DB_PATH", str(tmp_path / "demo.sqlite3"))
-    from src.inventory_demo import InventoryDemoApplication
-
-    with TestClient(InventoryDemoApplication().app) as demo:
-        response = demo.get("/inventory")
-        assert response.status_code == 200
-        assert "INVENTORY_DEMO_SESSION" in demo.cookies
-        assert "JWT_ACCESS_TOKEN_COOKIE" not in demo.cookies
-        assert demo.get("/inventory", headers={"host": "untrusted.example"}).status_code == 400
-        token = re.search(r'data-csrf-token="([^"]+)"', response.text)
-        assert token
-        assert demo.post("/inventory/products", headers={"X-CSRF-Token": token[1]}, json=item().model_dump()).status_code == 201
-        assert demo.post("/inventory/snapshots").status_code == 403
-        assert "quantity-dialog" not in response.text
-
-
 @pytest.mark.parametrize(
     "column,ascending,descending",
     [

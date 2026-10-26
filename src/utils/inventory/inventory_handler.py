@@ -42,11 +42,7 @@ class InventoryHandler:
 
     @staticmethod
     def _csrf_token(request: Request) -> str:
-        session = (
-            getattr(request.state, "inventory_demo_session", None)
-            or request.cookies.get("JWT_REFRESH_TOKEN_COOKIE")
-            or request.cookies.get("JWT_ACCESS_TOKEN_COOKIE")
-        )
+        session = request.cookies.get("JWT_REFRESH_TOKEN_COOKIE") or request.cookies.get("JWT_ACCESS_TOKEN_COOKIE")
         if not session:
             raise HTTPException(status_code=401, detail="Войдите в систему.")
         return hmac.new(session.encode(), b"clinic-inventory", hashlib.sha256).hexdigest()
