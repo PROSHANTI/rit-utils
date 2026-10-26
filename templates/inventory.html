@@ -28,7 +28,7 @@
         <div class="table-scroll" tabindex="0" aria-label="Таблица товаров">
             <table class="stock-table">
                 <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
-                <thead><tr>{% for column in columns %}<th scope="col" aria-sort="{{ 'ascending' if loop.first else 'none' }}"><button class="sort-button" type="button" data-sort="{{ sort_fields[loop.index0] }}">{{ column }} <span class="sort-arrow" aria-hidden="true">{{ '↑' if loop.first else '↕' }}</span></button></th>{% endfor %}<th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+                <thead><tr>{% for column in columns %}<th scope="col" aria-sort="{{ 'ascending' if loop.first else 'none' }}"><button class="sort-button" type="button" data-sort="{{ sort_fields[loop.index0] }}">{{ column }} <span class="sort-arrow" aria-hidden="true">{{ '↑' if loop.first else '↕' }}</span></button></th>{% endfor %}<th scope="col" class="actions-heading">Действие</th></tr></thead>
                 <tbody id="products-body"><tr><td colspan="9" class="empty-state">Загрузка…</td></tr></tbody>
             </table>
         </div>

@@ -25,6 +25,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .stock-table col:nth-child(8) { width: 170px; }
 .stock-table col:nth-child(9) { width: 87px; }
 .stock-table th { background: #5a141ee6; color: #fff; font-size: 12px; font-weight: 600; }
+.stock-table th.actions-heading { text-align: center; }
 .stock-table .sort-button { display: inline-flex; align-items: center; gap: 6px; width: auto; min-height: 24px; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font: inherit; text-align: left; color: inherit; cursor: pointer; }
 .stock-table .sort-button:hover { box-shadow: none; color: #ffc2ce; }
 .sort-arrow { color: #ca9da8; font-size: 12px; }
