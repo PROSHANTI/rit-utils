@@ -25,6 +25,9 @@ from fastapi.responses import FileResponse
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
+from src.utils.inventory.models import InventoryItem
+from src.utils.inventory.pdf_export import InventoryPdfExporter as ClinicPdfExporter
+from src.utils.inventory.repository import InventoryRepository as ClinicRepository
 from src.utils.one_alma.pdf_export import InventoryPdfExporter
 from src.utils.one_alma.repository import InventoryRepository
 
@@ -149,6 +152,22 @@ with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
     baseline["one_alma_pdf_bytes"] = len(inventory_pdf)
     baseline["one_alma_sqlite_persistence_ok"] = True
     baseline["one_alma_sales_history_ok"] = True
+
+with tempfile.TemporaryDirectory(prefix="clinic-inventory-arm64-") as temporary:
+    database = Path(temporary) / "inventory.sqlite3"
+    clinic_repository = ClinicRepository(database)
+    assert clinic_repository.items() == [] and clinic_repository.history() == []
+    product_id = clinic_repository.add(InventoryItem(article="0001", name="ARM64 inventory", quantity=3))
+    clinic_repository.create_snapshot()
+    clinic_repository.set_quantity(product_id, delta=1)
+    reopened = ClinicRepository(database)
+    assert reopened.items()[0].quantity == 4
+    assert json.loads(str(reopened.history()[0]["products_json"]))[0]["quantity"] == 3
+    assert list(reopened.backup_directory.glob("*.sqlite3"))
+    clinic_pdf = ClinicPdfExporter().export(*reopened.export_state())
+    assert clinic_pdf.startswith(b"%PDF-") and len(clinic_pdf) > 2000
+    baseline["clinic_inventory_pdf_bytes"] = len(clinic_pdf)
+    baseline["clinic_inventory_persistence_history_backups_ok"] = True
 
 Path("/tmp/arm64-runtime-baseline.json").write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n")
 if response.background is not None:

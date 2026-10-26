@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from src.auth import AuthenticationService
 from src.utils.doctor_form.doctor_form_handler import DoctorFormGenerator, DoctorFormRequest
 from src.utils.gen_cert.gen_cert_handler import CertificateGenerator, CertificateRequest
+from src.utils.inventory.inventory_handler import InventoryHandler
 from src.utils.one_alma.models import NewProduct
 from src.utils.one_alma.one_alma_handler import OneAlmaHandler
 from src.utils.remove_bg.remove_bg_handler import RemoveBackgroundHandler
@@ -25,6 +26,7 @@ class ApplicationRouter:
         self.doctor_forms = DoctorFormGenerator()
         self.images = RemoveBackgroundHandler()
         self.one_alma = OneAlmaHandler()
+        self.inventory = InventoryHandler()
         self.templates = Jinja2Templates(directory="templates")
         self.dependencies = [auth.dependency()]
         self.router = APIRouter()
@@ -223,6 +225,7 @@ class ApplicationRouter:
         return self.one_alma.import_products(request, file, csrf_token)
 
     def _register_routes(self) -> None:
+        self.router.include_router(self.inventory.router, dependencies=self.dependencies)
         routes: list[tuple[str, Callable[..., Response], list[str], bool, str, list[str]]] = [
             ("/login", self.login, ["POST"], False, "Авторизация", ["Авторизация"]),
             ("/logout", self.logout, ["POST"], True, "Выйти из системы", ["Выход из системы"]),

@@ -10,6 +10,8 @@ services:
       - .env
     environment:
       ONE_ALMA_DB_PATH: /app/data/one_alma.sqlite3
+      INVENTORY_DB_PATH: /app/data/inventory.sqlite3
+      INVENTORY_BACKUP_DIR: /app/data/inventory-backups
     volumes:
       - ./data:/app/data
       - ./src/utils/doctor_form:/app/src/utils/doctor_form

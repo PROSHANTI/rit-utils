@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Inventory backup and Nextcloud RIT file every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+OnBootSec=3min
+Persistent=true
+Unit=inventory-backup.service
+
+[Install]
+WantedBy=timers.target
