@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 COLUMNS = (
     "№",
@@ -83,6 +84,56 @@ class Product:
         return len(self.units) - self.sold_count
 
 
+def format_cents(value: int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{Decimal(value) / 100:,.2f}".replace(",", " ").replace(".", ",")
+
+
+@dataclass(frozen=True, slots=True)
+class Sale:
+    id: int
+    product_id: int
+    cells: tuple[str, ...]
+    customer: str
+    quantity: int
+    price_cents: int | None
+    created_at: datetime
+    cancelled_at: datetime | None
+
+    @property
+    def amount_cents(self) -> int | None:
+        return None if self.price_cents is None else self.price_cents * self.quantity
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    id: int
+    product_id: int
+    created_at: datetime
+    cells: tuple[str, ...]
+    description: str
+    customer: str = "—"
+    quantity: str = "—"
+    price: str = "—"
+    amount: str = "—"
+    sale_id: int | None = None
+    cancelled: bool = False
+    can_cancel: bool = False
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        return (
+            self.created_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
+            f"{self.cells[1]}\n№ {self.cells[0]}",
+            self.description,
+            self.customer,
+            self.quantity,
+            self.price,
+            self.amount,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Valuation:
     label: str
@@ -105,6 +156,16 @@ class Valuation:
 @dataclass(frozen=True, slots=True)
 class Inventory:
     products: tuple[Product, ...]
+    sales: tuple[Sale, ...] = ()
+    history: tuple[HistoryEntry, ...] = ()
+
+    @property
+    def sales_amount(self) -> str:
+        return format_cents(sum(sale.amount_cents or 0 for sale in self.sales if sale.cancelled_at is None))
+
+    @property
+    def sales_unpriced(self) -> int:
+        return sum(sale.quantity for sale in self.sales if sale.cancelled_at is None and sale.price_cents is None)
 
     @property
     def showcase_quantity(self) -> int:
@@ -150,7 +211,7 @@ class Inventory:
             )
         else:
             ordered = sorted(self.products, key=lambda product: self._natural_key(product.cells[column]), reverse=descending)
-        return Inventory(tuple(ordered))
+        return Inventory(tuple(ordered), self.sales, self.history)
 
     @property
     def valuations(self) -> tuple[Valuation, ...]:

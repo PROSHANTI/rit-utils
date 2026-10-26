@@ -57,6 +57,9 @@ class TestApplicationRoutes:
             ("/remove_bg", "GET"),
             ("/remove_bg", "POST"),
             ("/one_alma", "GET"),
+            ("/one_alma/products/{product_id}/sales", "POST"),
+            ("/one_alma/products/{product_id}/history", "GET"),
+            ("/one_alma/sales/{sale_id}/cancel", "POST"),
             ("/one_alma/units/{unit_id}", "POST"),
             ("/one_alma/products/{product_id}/sold", "POST"),
             ("/one_alma/products/{product_id}/showcase", "POST"),
@@ -65,17 +68,32 @@ class TestApplicationRoutes:
             ("/one_alma/products/{product_id}", "PUT"),
             ("/one_alma/products", "DELETE"),
             ("/one_alma/import", "POST"),
+            ("/inventory", "GET"),
+            ("/inventory/items", "GET"),
+            ("/inventory/products", "POST"),
+            ("/inventory/products/{item_id}", "PUT"),
+            ("/inventory/products/{item_id}", "DELETE"),
+            ("/inventory/products/{item_id}/quantity", "POST"),
+            ("/inventory/snapshots", "POST"),
+            ("/inventory/history", "GET"),
+            ("/inventory/history/{snapshot_id}", "DELETE"),
+            ("/inventory/import", "POST"),
+            ("/inventory/pdf", "GET"),
         }
 
-        assert len(router_routes) == 22
-        assert len(application_routes) == 22
+        assert len(router_routes) == 36
+        assert len(application_routes) == 36
         assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
         assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 
     def test_endpoint_methods_are_bound_without_self_query_parameter(self):
         routes = [route for route in application.routes.router.routes if isinstance(route, APIRoute)]
 
-        assert all(getattr(route.endpoint, "__self__", None) is application.routes for route in routes)
+        assert all(
+            getattr(route.endpoint, "__self__", None)
+            is (application.routes.inventory if route.path.startswith("/inventory") else application.routes)
+            for route in routes
+        )
         assert all(parameter.name != "self" for route in routes for parameter in route.dependant.query_params)
 
     @pytest.mark.parametrize(

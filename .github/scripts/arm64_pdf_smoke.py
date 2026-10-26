@@ -25,6 +25,9 @@ from fastapi.responses import FileResponse
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
+from src.utils.inventory.models import InventoryItem
+from src.utils.inventory.pdf_export import InventoryPdfExporter as ClinicPdfExporter
+from src.utils.inventory.repository import InventoryRepository as ClinicRepository
 from src.utils.one_alma.pdf_export import InventoryPdfExporter
 from src.utils.one_alma.repository import InventoryRepository
 
@@ -132,10 +135,39 @@ with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
     inventory = inventory_repository.set_sold_count(inventory.products[0].id, 2)
     assert (inventory.sold, inventory.available, inventory.showcase_quantity) == (2, 48, 0)
     assert len(inventory.products) == 25
+    second_product = inventory.products[1]
+    inventory_repository.set_showcase_quantity(second_product.id, 1)
+    request_id = "00000000-0000-4000-8000-000000000001"
+    recorded = inventory_repository.record_sale(second_product.id, 1, "ARM64 smoke", "79,99", request_id)
+    sale = recorded.sales[-1]
+    assert sale.price_cents == 7999 and recorded.sold == 3
+    assert InventoryRepository(database).snapshot().sales[-1] == sale
+    assert inventory_repository.record_sale(second_product.id, 1, "ARM64 smoke", "79,99", request_id) == recorded
+    inventory = inventory_repository.cancel_sale(sale.id)
+    assert inventory.sold == 2 and inventory.showcase_quantity == 1
+    assert inventory.history[0].description == f"Отмена продажи #{sale.id}"
+    assert InventoryRepository(database).snapshot() == inventory
     inventory_pdf = InventoryPdfExporter().export(inventory)
     assert inventory_pdf.startswith(b"%PDF-") and len(inventory_pdf) > 2000
     baseline["one_alma_pdf_bytes"] = len(inventory_pdf)
     baseline["one_alma_sqlite_persistence_ok"] = True
+    baseline["one_alma_sales_history_ok"] = True
+
+with tempfile.TemporaryDirectory(prefix="clinic-inventory-arm64-") as temporary:
+    database = Path(temporary) / "inventory.sqlite3"
+    clinic_repository = ClinicRepository(database)
+    assert clinic_repository.items() == [] and clinic_repository.history() == []
+    product_id = clinic_repository.add(InventoryItem(article="0001", name="ARM64 inventory", quantity=3))
+    clinic_repository.create_snapshot()
+    clinic_repository.set_quantity(product_id, delta=1)
+    reopened = ClinicRepository(database)
+    assert reopened.items()[0].quantity == 4
+    assert json.loads(str(reopened.history()[0]["products_json"]))[0]["quantity"] == 3
+    assert list(reopened.backup_directory.glob("*.sqlite3"))
+    clinic_pdf = ClinicPdfExporter().export(*reopened.export_state())
+    assert clinic_pdf.startswith(b"%PDF-") and len(clinic_pdf) > 2000
+    baseline["clinic_inventory_pdf_bytes"] = len(clinic_pdf)
+    baseline["clinic_inventory_persistence_history_backups_ok"] = True
 
 Path("/tmp/arm64-runtime-baseline.json").write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n")
 if response.background is not None:

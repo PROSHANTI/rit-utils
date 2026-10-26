@@ -1,0 +1,9 @@
+# Merge with the persistent Pi compose.yml when deploying the inventory feature.
+# No container/image/public-site changes are needed for the local demo.
+services:
+  app:
+    environment:
+      INVENTORY_DB_PATH: /app/data/inventory.sqlite3
+      INVENTORY_BACKUP_DIR: /app/data/inventory-backups
+    volumes:
+      - ./data:/app/data

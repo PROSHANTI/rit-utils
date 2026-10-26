@@ -2,13 +2,15 @@ import hashlib
 import hmac
 import logging
 import sqlite3
+from collections.abc import Callable
 
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .excel_import import ExcelProductImporter
-from .models import COLUMNS, Inventory, NewProduct
+from .expiry import get_expiry_info
+from .models import COLUMNS, Inventory, NewProduct, format_cents
 from .pdf_export import InventoryPdfExporter
 from .repository import InventoryRepository
 
@@ -33,6 +35,7 @@ class OneAlmaHandler:
             {
                 "inventory": inventory,
                 "columns": COLUMNS,
+                "expiry_info": {product.id: get_expiry_info(product.cells[4]) for product in inventory.products},
                 "csrf_token": self._csrf_token(request),
             },
             headers={"Cache-Control": "no-store"},
@@ -44,10 +47,65 @@ class OneAlmaHandler:
             inventory = self.repository.set_sold(unit_id, sold)
         except LookupError:
             raise HTTPException(status_code=404, detail="Товар не найден") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
         except sqlite3.Error:
             logger.exception("Не удалось сохранить отметку продажи OneAlma")
             raise HTTPException(status_code=503, detail="Не удалось сохранить продажу. Попробуйте позже.") from None
         return self._inventory_response(inventory)
+
+    def record_sale(
+        self, request: Request, product_id: int, quantity: int, customer: str, unit_price: str, request_id: str, csrf_token: str
+    ) -> Response:
+        self._check_csrf(request, csrf_token)
+        return self._sale_change(lambda: self.repository.record_sale(product_id, quantity, customer, unit_price, request_id))
+
+    def cancel_sale(self, request: Request, sale_id: int, csrf_token: str) -> Response:
+        self._check_csrf(request, csrf_token)
+        return self._sale_change(lambda: self.repository.cancel_sale(sale_id))
+
+    def _sale_change(self, operation: Callable[[], Inventory]) -> Response:
+        try:
+            inventory = operation()
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except sqlite3.Error:
+            logger.exception("Не удалось сохранить продажу OneAlma")
+            raise HTTPException(status_code=503, detail="Не удалось сохранить продажу. Попробуйте позже.") from None
+        return self._inventory_response(inventory)
+
+    def history(self, product_id: int) -> Response:
+        try:
+            inventory = self.repository.snapshot()
+        except sqlite3.Error:
+            logger.exception("Не удалось прочитать историю OneAlma")
+            raise HTTPException(status_code=503, detail="История временно недоступна.") from None
+        product = next((product for product in inventory.products if product.id == product_id), None)
+        if product is None:
+            raise HTTPException(status_code=404, detail="Товар не найден.")
+        sales = [sale for sale in inventory.sales if sale.product_id == product_id and sale.cancelled_at is None]
+        return JSONResponse(
+            {
+                "sold": product.sold_count,
+                "legacy_sold": max(0, product.sold_count - sum(sale.quantity for sale in sales)),
+                "amount": format_cents(sum(sale.amount_cents or 0 for sale in sales)),
+                "unpriced": sum(sale.quantity for sale in sales if sale.price_cents is None),
+                "entries": [
+                    {
+                        "id": entry.id,
+                        "values": entry.values,
+                        "sale_id": entry.sale_id,
+                        "cancelled": entry.cancelled,
+                        "can_cancel": entry.can_cancel,
+                    }
+                    for entry in inventory.history
+                    if entry.product_id == product_id
+                ],
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     def set_product_count(
         self, request: Request, product_id: int, quantity: int, csrf_token: str, *, showcase: bool = False
@@ -76,6 +134,8 @@ class OneAlmaHandler:
                 "available": inventory.available,
                 "showcase_quantity": inventory.showcase_quantity,
                 "showcased_products": inventory.showcased_products,
+                "sales_amount": inventory.sales_amount,
+                "sales_unpriced": inventory.sales_unpriced,
                 "valuations": [
                     {"amounts": valuation.amounts, "unpriced": valuation.unpriced} for valuation in inventory.valuations
                 ],
@@ -86,6 +146,7 @@ class OneAlmaHandler:
                         "sold": product.sold_count,
                         "available": product.available,
                         "showcase_quantity": product.showcase_quantity,
+                        "expiry_status": get_expiry_info(product.cells[4]).status,
                         "units": [{"id": unit.id, "sold": unit.sold} for unit in product.units],
                     }
                     for product in inventory.products

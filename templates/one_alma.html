@@ -6,8 +6,9 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=showcase-2">
-    <script src="/static/one_alma.js?v=showcase-2" defer></script>
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=sales-1">
+    <script src="/static/one_alma_expiry.js?v=sales-1" defer></script>
+    <script src="/static/one_alma.js?v=sales-1" defer></script>
 </head>
 <body class="inventory-page">
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
@@ -40,6 +41,7 @@
                     </tbody>
                 </table>
             </div>
+            <p class="sales-revenue">По оформленным продажам: <strong id="sales-amount">{{ inventory.sales_amount }} ₽</strong><span id="sales-unpriced">{% if inventory.sales_unpriced %} · без цены: {{ inventory.sales_unpriced }} шт.{% endif %}</span></p>
         </details>
         <div class="inventory-actions">
             <a class="download-pdf" href="/one_alma/pdf" download="one_alma.pdf">Скачать PDF</a>
@@ -53,8 +55,9 @@
                 <button type="button" id="delete-selected" class="secondary-button" disabled>Удалить выбранные</button>
             </div>
             <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+            <p class="expiry-legend"><span>Красный — срок истёк</span><span>Жёлтый — осталось до двух месяцев</span></p>
             <div class="inventory-scroll" tabindex="0" aria-label="Таблица товаров, прокручивается горизонтально">
-                <table class="inventory-table">
+                <table class="inventory-table"><colgroup><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
                     <caption class="visually-hidden">Товары OneAlma: цены указаны за одну штуку</caption>
                     <thead><tr>
                         <th scope="col" class="selection-cell"><input type="checkbox" id="select-all" aria-label="Выбрать все товары"></th>
@@ -65,19 +68,21 @@
                     </tr></thead>
                     <tbody>
                         {% for product in inventory.products %}
-                        <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" data-showcase="{{ product.showcase_quantity }}" data-unit-ids="{{ product.units | map(attribute='id') | list | tojson | forceescape }}" class="{% if product.available == 0 %}sold-out{% endif %}">
+                        <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" data-showcase="{{ product.showcase_quantity }}" data-unit-ids="{{ product.units | map(attribute='id') | list | tojson | forceescape }}" class="expiry-{{ expiry_info[product.id].status }}{% if product.available == 0 %} sold-out{% endif %}">
                             <td class="selection-cell"><input type="checkbox" class="select-product" value="{{ product.id }}" aria-label="Выбрать {{ product.cells[2] }}"></td>
-                            {% for cell in product.cells %}<td>{{ cell }}</td>{% endfor %}
+                            {% for cell in product.cells %}<td{% if loop.index0 == 4 %} class="expiry-cell" title="Годен до {{ expiry_info[product.id].expires_on.strftime('%d.%m.%Y') }} включительно. {% if expiry_info[product.id].days_remaining < 0 %}Срок истёк.{% else %}Осталось: {{ expiry_info[product.id].days_remaining }} дн.{% endif %}"{% endif %}>{{ cell }}</td>{% endfor %}
                             <td class="showcase-cell">
-                                <button type="button" class="count-badge showcase-badge {% if product.showcase_quantity == 0 %}empty{% endif %}" data-count-kind="showcase" aria-label="Настроить витрину: {{ product.cells[1] }}" {% if product.available == 0 %}disabled{% endif %}>{% if product.showcase_quantity %}✓ {{ product.showcase_quantity }} шт.{% else %}+ Выставить{% endif %}</button>
+                                <button type="button" class="count-badge showcase-badge {% if product.showcase_quantity == 0 %}empty{% endif %}" data-count-kind="showcase" aria-label="Настроить витрину: {{ product.cells[1] }}" {% if product.available == 0 %}disabled{% endif %}>{% if product.showcase_quantity %}✓ {{ product.showcase_quantity }} шт.{% else %}+{% endif %}</button>
                             </td>
                             <td class="sale-cell">
-                                <button type="button" class="count-badge sold-badge {% if product.sold_count == 0 %}empty{% endif %}" data-count-kind="sold" aria-label="Настроить продажи: {{ product.cells[1] }}"><span class="count-text">{{ product.sold_count }} из {{ product.units | length }}</span><span class="badge-arrow" aria-hidden="true">⌄</span></button>
+                                <span class="count-badge sold-badge {% if product.sold_count == 0 %}empty{% endif %}" aria-label="Продано {{ product.sold_count }} из {{ product.units | length }}"><span class="count-text">{{ product.sold_count }} из {{ product.units | length }}</span></span>
                             </td>
-                            <td class="row-actions">
+                            <td class="row-actions"><div class="row-action-buttons">
                                 <button type="button" class="icon-button edit-product" title="Редактировать товар" aria-label="Редактировать {{ product.cells[2] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6 12-12Zm-1 2 5 5M4 15l5 5"/></svg></button>
                                 <button type="button" class="icon-button delete-product" title="Удалить товар" aria-label="Удалить {{ product.cells[2] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V3h6v4M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg></button>
-                            </td>
+                                <button type="button" class="icon-button record-sale" title="Продать" aria-label="Продать {{ product.cells[1] }}, № {{ product.cells[0] }}" {% if product.available == 0 %}disabled{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h3l3 12h11l3-9H6"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg></button>
+                                <button type="button" class="icon-button product-history" title="История" aria-label="История {{ product.cells[1] }}, № {{ product.cells[0] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+                            </div></td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -85,17 +90,15 @@
             </div>
             <p class="inventory-note">Цены за 1 штуку. Цена по ЦБ РФ — на 27.05.2026. Данные: прайс Emansi.</p>
         </section>
-        <aside id="count-editor" class="count-editor" role="dialog" aria-labelledby="count-editor-title" hidden>
+        <dialog id="count-editor" class="inventory-dialog showcase-dialog" aria-labelledby="count-editor-title">
             <form id="count-form">
-                <button type="button" class="count-close" id="count-close" aria-label="Закрыть настройку количества">×</button>
-                <h3 id="count-editor-title">Количество</h3>
-                <p id="count-context"></p>
+                <div class="dialog-heading"><h2 id="count-editor-title">На витрине</h2><button type="button" class="close-dialog" id="count-close" aria-label="Закрыть настройку витрины">×</button></div>
+                <p id="count-context" class="product-context"></p>
                 <div class="count-control"><label for="count-quantity">Количество, шт.</label><div class="count-stepper"><button type="button" id="count-minus" aria-label="Уменьшить количество на одну штуку">−</button><input id="count-quantity" type="number" min="0" max="1000" step="1" value="0" required><button type="button" id="count-plus" aria-label="Увеличить количество на одну штуку">+</button></div></div>
-                <p id="count-remaining" class="count-remaining" hidden></p>
                 <p id="count-error" class="count-error" role="alert"></p>
                 <button type="submit" id="count-save">Сохранить</button>
             </form>
-        </aside>
+        </dialog>
         <dialog id="product-dialog" class="inventory-dialog">
             <form id="product-form">
                 <div class="dialog-heading"><h2 id="product-dialog-title">Добавить товар</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
@@ -124,6 +127,7 @@
                     <li>Годен до: <strong>09.2028</strong>. Цены: <strong>1343,43</strong> или <strong>1343.43</strong>, без ₽.</li>
                     <li>Пустая цена означает, что цена неизвестна; при обновлении она очистит прежнюю цену. Артикулы с начальным нулём храните как текст.</li>
                     <li>Количество — общее число штук, включая проданные. Оно заменит текущее количество; отметки продаж сохранятся. Указать меньше уже проданного нельзя. Без этой колонки количество будет 2.</li>
+                    <li>История продаж, покупатели, дата и цена продажи из Excel не загружаются и не перезаписываются.</li>
                     <li>Витрина не загружается из Excel: у новых позиций 0, ручное количество существующих сохраняется в пределах остатка. При уменьшении остатка витрина не может превышать его.</li>
                     <li>Поддерживается и исходная таблица Emansi с её заголовками. При ошибке импорт целиком отменяется.</li>
                 </ul>
@@ -133,6 +137,9 @@
                 <button type="submit">Импортировать</button>
             </form>
         </dialog>
+<dialog class="inventory-dialog sales-dialog" id="sale-dialog" aria-labelledby="sale-heading"><form id="sale-form"><div class="dialog-heading"><h2 id="sale-heading">Продажа</h2><button class="close-dialog" type="button" data-close aria-label="Закрыть продажу">×</button></div><p class="product-context" id="sale-context"></p><div class="product-form-grid"><div><label for="sale-article">Артикул</label><input id="sale-article" readonly></div><div><label for="sale-date">Дата продажи · Москва, UTC+3</label><input id="sale-date" readonly></div><div class="wide-field"><label for="sale-customer">Кому</label><input id="sale-customer" maxlength="200" placeholder="Имя, компания или пометка" autocomplete="off"></div><div class="wide-field"><label for="sale-price">Цена за 1 шт., ₽</label><input id="sale-price" inputmode="decimal" placeholder="—" maxlength="24"><p class="field-note" id="sale-price-note"></p><p class="error" id="sale-price-error" role="alert"></p></div><div class="wide-field"><div class="quantity-line"><label for="sale-quantity">Количество, шт.</label><div class="count-stepper"><button type="button" id="sale-minus" aria-label="Уменьшить количество">−</button><input id="sale-quantity" value="1" type="number" min="1" step="1" required><button type="button" id="sale-plus" aria-label="Увеличить количество">+</button></div></div><p class="field-note" id="sale-stock"></p><p class="error" id="sale-quantity-error" role="alert"></p></div></div><div class="sale-total"><span>Сумма продажи</span><strong id="sale-total">—</strong></div><p class="error" id="sale-error" role="alert"></p><div class="dialog-actions"><button type="button" class="quiet" id="sale-history">История</button><button type="submit" class="primary" id="sale-save">Оформить продажу</button></div></form></dialog>
+<dialog id="history-dialog" class="inventory-dialog sales-history" aria-labelledby="history-heading"><div class="dialog-heading"><h2 id="history-heading">История</h2><button class="close-dialog" data-close aria-label="Закрыть историю">×</button></div><p class="product-context" id="history-context"></p><div class="history-top" id="history-summary"></div><div id="history-content"></div></dialog>
+<dialog class="inventory-dialog sales-dialog" id="undo-dialog" aria-labelledby="undo-heading"><div class="dialog-heading"><h2 id="undo-heading">Отменить продажу?</h2><button class="close-dialog" data-close aria-label="Закрыть отмену">×</button></div><p id="undo-text" class="confirm-text"></p><p class="field-note">Штуки вернутся в остаток. Запись останется в истории с пометкой «Отменена». Количество на витрине можно изменить вручную.</p><p class="error" id="undo-error" role="alert"></p><div class="dialog-actions"><button class="quiet" data-close>Оставить продажу</button><button id="undo-confirm" class="primary">Отменить продажу</button></div></dialog>
         <noscript><p class="error-message">Включите JavaScript, чтобы отмечать продажи.</p></noscript>
     </main>
     {% include "footer.html" %}

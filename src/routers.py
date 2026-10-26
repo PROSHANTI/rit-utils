@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from src.auth import AuthenticationService
 from src.utils.doctor_form.doctor_form_handler import DoctorFormGenerator, DoctorFormRequest
 from src.utils.gen_cert.gen_cert_handler import CertificateGenerator, CertificateRequest
+from src.utils.inventory.inventory_handler import InventoryHandler
 from src.utils.one_alma.models import NewProduct
 from src.utils.one_alma.one_alma_handler import OneAlmaHandler
 from src.utils.remove_bg.remove_bg_handler import RemoveBackgroundHandler
@@ -25,6 +26,7 @@ class ApplicationRouter:
         self.doctor_forms = DoctorFormGenerator()
         self.images = RemoveBackgroundHandler()
         self.one_alma = OneAlmaHandler()
+        self.inventory = InventoryHandler()
         self.templates = Jinja2Templates(directory="templates")
         self.dependencies = [auth.dependency()]
         self.router = APIRouter()
@@ -138,6 +140,24 @@ class ApplicationRouter:
     ) -> Response:
         return self.one_alma.set_product_count(request, product_id, quantity, csrf_token, showcase=True)
 
+    def one_alma_record_sale(
+        self,
+        request: Request,
+        product_id: int,
+        quantity: int = Form(..., ge=1, le=1000),
+        customer: str = Form("", max_length=200),
+        unit_price: str = Form("", max_length=32),
+        request_id: str = Form(..., max_length=64),
+        csrf_token: str = Form(...),
+    ) -> Response:
+        return self.one_alma.record_sale(request, product_id, quantity, customer, unit_price, request_id, csrf_token)
+
+    def one_alma_cancel_sale(self, request: Request, sale_id: int, csrf_token: str = Form(...)) -> Response:
+        return self.one_alma.cancel_sale(request, sale_id, csrf_token)
+
+    def one_alma_history(self, product_id: int) -> Response:
+        return self.one_alma.history(product_id)
+
     def one_alma_add_product(
         self,
         request: Request,
@@ -205,6 +225,7 @@ class ApplicationRouter:
         return self.one_alma.import_products(request, file, csrf_token)
 
     def _register_routes(self) -> None:
+        self.router.include_router(self.inventory.router, dependencies=self.dependencies)
         routes: list[tuple[str, Callable[..., Response], list[str], bool, str, list[str]]] = [
             ("/login", self.login, ["POST"], False, "Авторизация", ["Авторизация"]),
             ("/logout", self.logout, ["POST"], True, "Выйти из системы", ["Выход из системы"]),
@@ -248,6 +269,16 @@ class ApplicationRouter:
             ("/remove_bg", self.remove_bg_page, ["GET"], True, "Страница удаления фона с изображений", ["Удаление фона"]),
             ("/remove_bg", self.remove_bg_endpoint, ["POST"], True, "Удалить фон с изображения", ["Удаление фона"]),
             ("/one_alma", self.one_alma_page, ["GET"], True, "Учет OneAlma", ["OneAlma"]),
+            (
+                "/one_alma/products/{product_id}/sales",
+                self.one_alma_record_sale,
+                ["POST"],
+                True,
+                "Оформить продажу",
+                ["OneAlma"],
+            ),
+            ("/one_alma/products/{product_id}/history", self.one_alma_history, ["GET"], True, "История товара", ["OneAlma"]),
+            ("/one_alma/sales/{sale_id}/cancel", self.one_alma_cancel_sale, ["POST"], True, "Отменить продажу", ["OneAlma"]),
             ("/one_alma/units/{unit_id}", self.one_alma_sale, ["POST"], True, "Отметить продажу товара", ["OneAlma"]),
             ("/one_alma/products/{product_id}/sold", self.one_alma_sold_count, ["POST"], True, "Количество продаж", ["OneAlma"]),
             (

@@ -237,3 +237,4 @@ renew-cert.sh
 get-docker.sh
 webhook-server.py
 *.service
+!deploy/pi/inventory-backup.service

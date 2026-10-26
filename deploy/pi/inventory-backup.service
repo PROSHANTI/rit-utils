@@ -1,0 +1,10 @@
+[Unit]
+Description=Consistent Inventory SQLite backup and verified Nextcloud RIT export
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=300
+EnvironmentFile=/home/umbrel/one-alma-backup/webdav.env
+ExecStart=/usr/bin/python3 /home/umbrel/inventory-backup/backup.py --source /home/umbrel/rit-utils/data/inventory.sqlite3 --destination /home/umbrel/umbrel/home/Backups/Inventory

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Инвентаризация — RIT-UTILS</title>
+    <link rel="icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/css/style_utils.css">
+    <link rel="stylesheet" href="/static/css/inventory.css">
+    <script src="/static/inventory.js" defer></script>
+</head>
+<body class="clinic-inventory-page">
+<main class="clinic-inventory" data-csrf-token="{{ csrf_token }}">
+    <header class="inventory-title">
+        <img src="/static/images/inventory.svg" width="52" height="52" alt="">
+        <h1>Инвентаризация</h1>
+    </header>
+    <nav class="inventory-actions" aria-label="Действия с инвентаризацией">
+        <a class="action-button" id="download-pdf" href="/inventory/pdf" download>Скачать PDF</a>
+        <button class="action-button" id="save-snapshot" type="button">Инвентаризация</button>
+        <button class="action-button" data-open="import-dialog" type="button">Импорт</button>
+        <button class="action-button" id="show-history" type="button">История</button>
+    </nav>
+    <section class="inventory-panel" aria-label="Товары">
+        <div class="table-toolbar">
+            <button class="secondary-button" id="add-product" type="button"><span aria-hidden="true">＋</span> Добавить товар</button>
+        </div>
+        <div class="table-scroll" tabindex="0" aria-label="Таблица товаров">
+            <table class="stock-table">
+                <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
+                <thead><tr>{% for column in columns %}<th scope="col" aria-sort="{{ 'ascending' if loop.first else 'none' }}"><button class="sort-button" type="button" data-sort="{{ sort_fields[loop.index0] }}">{{ column }} <span class="sort-arrow" aria-hidden="true">{{ '↑' if loop.first else '↕' }}</span></button></th>{% endfor %}<th scope="col" class="actions-heading">Действие</th></tr></thead>
+                <tbody id="products-body"><tr><td colspan="9" class="empty-state">Загрузка…</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+    <p class="page-status" id="page-status" role="status" aria-live="polite"></p>
+</main>
+
+<dialog class="inventory-dialog" id="product-dialog" aria-labelledby="product-title">
+    <div class="dialog-heading"><h2 id="product-title">Добавить товар</h2><button class="close-dialog" data-close type="button" aria-label="Закрыть">×</button></div>
+    <form id="product-form">
+        <div class="product-grid">
+            <div><label for="product-article">Артикул</label><input id="product-article" name="article" maxlength="64" inputmode="numeric" pattern="[0-9]*" autocomplete="off"></div>
+            <div><label for="product-brand">Бренд</label><input id="product-brand" name="brand" maxlength="255"></div>
+            <div class="wide"><label for="product-name">Название</label><input id="product-name" name="name" maxlength="255" required></div>
+            <div><label for="product-purchase-price">Закупочная стоимость</label><input id="product-purchase-price" name="purchase_price" maxlength="255"></div>
+            <div><label for="product-sale-price">Цена продажи</label><input id="product-sale-price" name="sale_price" maxlength="255"></div>
+            <div><label for="product-expiry">Срок годности</label><input id="product-expiry" name="expiry" maxlength="255" pattern="(0[1-9]|1[0-2])\.[0-9]{4}"></div>
+            <div><label for="product-quantity">Количество</label><input id="product-quantity" name="quantity" value="0" inputmode="numeric" pattern="[0-9]+" required></div>
+        </div>
+        <p class="form-error" role="alert"></p>
+        <button class="action-button dialog-save" type="submit">Сохранить</button>
+    </form>
+</dialog>
+
+<dialog class="inventory-dialog" id="import-dialog" aria-labelledby="import-title">
+    <div class="dialog-heading"><h2 id="import-title">Импорт из Excel</h2><button class="close-dialog" data-close type="button" aria-label="Закрыть">×</button></div>
+    <form id="import-form">
+        <label for="import-file">Файл .xlsx</label><input id="import-file" name="file" type="file" accept=".xlsx" required>
+        <p class="import-note">«Цена» загружается в «Цена продажи». Найден артикул — товар обновится. Не найден — добавится новая строка. Количество заменяется остатком из файла. Поля, которых нет в Excel, сохраняются. Без артикула товар всегда добавляется заново. «Крит. остаток», единицы измерения, сумма и валюта не загружаются.</p>
+        <div id="import-preview" hidden></div>
+        <p class="form-error" role="alert"></p>
+        <button class="action-button dialog-save" type="submit">Предварительный просмотр</button>
+    </form>
+</dialog>
+
+<dialog class="inventory-dialog history-dialog" id="history-dialog" aria-labelledby="history-title">
+    <div class="dialog-heading"><h2 id="history-title">История инвентаризаций</h2><button class="close-dialog" data-close type="button" aria-label="Закрыть">×</button></div>
+    <div id="history-content"></div>
+    <p class="form-error" role="alert"></p>
+</dialog>
+
+<dialog class="inventory-dialog confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-title">
+    <div class="dialog-heading"><h2 id="confirm-title">Удалить инвентаризацию?</h2><button class="close-dialog" data-close type="button" aria-label="Закрыть">×</button></div>
+    <div class="confirm-actions"><button class="secondary-button" data-close type="button">Нет</button><button class="action-button" id="confirm-yes" type="button">Да</button></div>
+    <p class="form-error" role="alert"></p>
+</dialog>
+{% include "footer.html" %}
+</body>
+</html>

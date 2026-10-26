@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -12,7 +13,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import COLUMNS, Inventory
 
@@ -51,11 +52,8 @@ class InventoryPdfExporter:
                 [self._paragraph(cell, body) for cell in product.cells]
                 + [self._paragraph(showcase, sold_style), self._paragraph(sold, sold_style)]
             )
-        table = Table(
-            data,
-            colWidths=[9 * mm, 17 * mm, 61 * mm, 17 * mm, 19 * mm, 29 * mm, 29 * mm, 34 * mm, 20 * mm, 28 * mm],
-            repeatRows=1,
-        )
+        widths = [9, 17, 61, 17, 19, 29, 29, 34, 20, 28]
+        table = Table(data, colWidths=[width * document.width / sum(widths) for width in widths], repeatRows=1)
         table.setStyle(
             TableStyle(
                 [
@@ -70,27 +68,63 @@ class InventoryPdfExporter:
                 ]
             )
         )
-        document.build(
-            [
-                Paragraph("Учет OneAlma", title),
-                Paragraph(f"Учет продажи товаров. Состояние на {datetime.now().astimezone():%d.%m.%Y %H:%M %Z}", subtitle),
-                Spacer(1, 3 * mm),
-                Paragraph(
-                    f"Всего товаров: {inventory.total}. Продано: {inventory.sold}. В наличии: {inventory.available}.", subtitle
-                ),
-                Paragraph(f"На витрине: {inventory.showcase_quantity} шт. Входит в количество в наличии.", subtitle),
-                Spacer(1, 5 * mm),
-                Paragraph(cb_summary, subtitle),
-                Spacer(1, 5 * mm),
-                table,
+        story = [
+            Paragraph("Учет OneAlma", title),
+            Paragraph(f"Учет продажи товаров. Состояние на {datetime.now(ZoneInfo('Europe/Moscow')):%d.%m.%Y %H:%M}", subtitle),
+            Spacer(1, 3 * mm),
+            Paragraph(
+                f"Всего товаров: {inventory.total}. Продано: {inventory.sold}. В наличии: {inventory.available}.", subtitle
+            ),
+            Paragraph(f"На витрине: {inventory.showcase_quantity} шт. Входит в количество в наличии.", subtitle),
+            Spacer(1, 5 * mm),
+            Paragraph(cb_summary, subtitle),
+            Spacer(1, 5 * mm),
+            table,
+        ]
+        if inventory.history:
+            history_data = [
+                [
+                    self._paragraph(label, header)
+                    for label in ("Дата", "Товар", "Действие", "Кому", "Кол-во, шт.", "Цена за шт., ₽", "Сумма, ₽")
+                ]
             ]
-        )
+            for entry in inventory.history:
+                history_data.append([self._paragraph(value, body) for value in entry.values])
+            history_widths = [34, 22, 43, 48, 20, 28, 29]
+            history_table = Table(
+                history_data, colWidths=[width * document.width / sum(history_widths) for width in history_widths], repeatRows=1
+            )
+            history_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#9d233f")),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+                        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d2d2d2")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ]
+                )
+            )
+            unpriced = f" Без цены: {inventory.sales_unpriced} шт. В сумму не входят." if inventory.sales_unpriced else ""
+            story.extend(
+                [
+                    PageBreak(),
+                    Paragraph("История изменений", title),
+                    Paragraph(f"Продажи за вычетом отмен: {inventory.sales_amount} ₽.{unpriced}", subtitle),
+                    Spacer(1, 5 * mm),
+                    history_table,
+                ]
+            )
+        document.build(story)
         logger.info("PDF учёта OneAlma сформирован: %s позиций", len(inventory.products))
         return output.getvalue()
 
     @staticmethod
     def _paragraph(text: str, style: ParagraphStyle) -> Paragraph:
-        return Paragraph(escape(text).replace("\n", "<br/>"), style)
+        return Paragraph(escape(text.replace("−", "-")).replace("\n", "<br/>"), style)
 
     @staticmethod
     def _register_fonts() -> None:
