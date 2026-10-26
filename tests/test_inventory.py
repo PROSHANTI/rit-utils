@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -398,3 +399,33 @@ def test_sorting_api_pdf_and_headers_share_the_same_order(authenticated_client, 
     text = PdfReader(BytesIO(pdf.content)).pages[0].extract_text()
     assert text.index("Меньше") < text.index("Больше")
     assert authenticated_client.get("/inventory/items?sort=unknown").status_code == 422
+
+
+def test_operation_logs_include_action_and_id_without_product_data_or_csrf(authenticated_client, store, headers, caplog):
+    caplog.set_level(logging.INFO)
+    confidential = "PRIVATE_PRODUCT_DATA_MUST_NOT_BE_LOGGED"
+    client = authenticated_client
+    data = item().model_dump() | {"name": confidential}
+    assert client.post("/inventory/products", headers=headers, json=data).status_code == 201
+    item_id = store.items()[0].id
+    assert client.put(f"/inventory/products/{item_id}", headers=headers, json=data).status_code == 200
+    assert client.post(f"/inventory/products/{item_id}/quantity", headers=headers, json={"delta": 1}).status_code == 200
+    snapshot_id = client.post("/inventory/snapshots", headers=headers).json()["id"]
+    assert client.get("/inventory/pdf").status_code == 200
+    assert client.delete(f"/inventory/history/{snapshot_id}", headers=headers).status_code == 200
+    assert client.delete(f"/inventory/products/{item_id}", headers=headers).status_code == 200
+    assert client.post("/inventory/snapshots", headers={"X-CSRF-Token": "PRIVATE_INVALID_CSRF"}).status_code == 403
+    messages = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith("src.utils.inventory"))
+    for action in (
+        "Товар добавлен: id=",
+        "Товар изменён: id=",
+        "Количество сохранено: id=",
+        "Инвентаризация сохранена: id=",
+        "PDF инвентаризации сформирован",
+        "Инвентаризация удалена: id=",
+        "Товар удалён: id=",
+        "CSRF не пройдена",
+    ):
+        assert action in messages
+    assert confidential not in messages and "PRIVATE_INVALID_CSRF" not in messages
+    assert headers["X-CSRF-Token"] not in messages

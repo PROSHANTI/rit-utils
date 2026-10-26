@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 from collections.abc import Iterator
@@ -9,6 +10,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from .models import MOSCOW, InventoryItem, StoredItem
+
+logger = logging.getLogger(__name__)
 
 
 class InventoryRepository:
@@ -64,6 +67,7 @@ class InventoryRepository:
                 source.backup(destination)
             partial.chmod(0o600)
             partial.replace(target)
+            logger.debug("Создана резервная копия инвентаризации: %s", target.name)
         finally:
             partial.unlink(missing_ok=True)
         for old in sorted(self.backup_directory.glob("inventory-*.sqlite3"), reverse=True)[self.backup_limit :]:

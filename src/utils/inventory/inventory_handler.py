@@ -56,16 +56,20 @@ class InventoryHandler:
             return
         supplied = request.headers.get("X-CSRF-Token", "")
         if not hmac.compare_digest(supplied.encode(), self._csrf_token(request).encode()):
+            logger.warning("Запрос к инвентаризации отклонён: проверка CSRF не пройдена")
             raise HTTPException(status_code=403, detail="Обновите страницу и повторите действие.")
 
     def _call(self, operation: Callable[[], T]) -> T:
         try:
             return operation()
         except LookupError as exc:
+            logger.warning("Операция инвентаризации отклонена: объект не найден")
             raise HTTPException(status_code=404, detail=str(exc)) from None
         except ValidationError:
+            logger.warning("Операция инвентаризации отклонена: некорректные поля товара")
             raise HTTPException(status_code=422, detail="Проверьте поля товара и целое неотрицательное количество.") from None
         except ValueError as exc:
+            logger.warning("Операция инвентаризации отклонена: входные данные не прошли проверку")
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except (sqlite3.Error, OSError):
             logger.exception("Ошибка базы или резервной копии инвентаризации")
@@ -73,6 +77,7 @@ class InventoryHandler:
 
     def page(self, request: Request) -> Response:
         items = self._call(self.repository.items)
+        logger.debug("Отображение инвентаризации: позиций %s", len(items))
         return self.templates.TemplateResponse(
             request,
             "inventory.html",
@@ -91,24 +96,30 @@ class InventoryHandler:
 
         return JSONResponse({"items": self._call(read)}, headers={"Cache-Control": "no-store"})
 
-    def _changed(self, operation: Callable[[], object], message: str, status: int = 200) -> Response:
-        self._call(operation)
+    def _changed(
+        self, operation: Callable[[], object], message: str, status: int = 200, *, object_id: int | None = None
+    ) -> Response:
+        result = self._call(operation)
+        logger.info("%s: id=%s", message, object_id if object_id is not None else result)
         return JSONResponse({"detail": message}, status_code=status, headers={"Cache-Control": "no-store"})
 
     def add(self, item: InventoryItem) -> Response:
         return self._changed(lambda: self.repository.add(item), "Товар добавлен", 201)
 
     def update(self, item_id: int, item: InventoryItem) -> Response:
-        return self._changed(lambda: self.repository.update(item_id, item), "Товар изменён")
+        return self._changed(lambda: self.repository.update(item_id, item), "Товар изменён", object_id=item_id)
 
     def delete(self, item_id: int) -> Response:
-        return self._changed(lambda: self.repository.delete(item_id), "Товар удалён")
+        return self._changed(lambda: self.repository.delete(item_id), "Товар удалён", object_id=item_id)
 
     def quantity(self, item_id: int, change: QuantityChange) -> Response:
-        return self._changed(lambda: self.repository.set_quantity(item_id, **change.model_dump()), "Количество сохранено")
+        return self._changed(
+            lambda: self.repository.set_quantity(item_id, **change.model_dump()), "Количество сохранено", object_id=item_id
+        )
 
     def create_snapshot(self) -> Response:
         snapshot_id = self._call(self.repository.create_snapshot)
+        logger.info("Инвентаризация сохранена: id=%s", snapshot_id)
         return JSONResponse({"detail": f"Инвентаризация #{snapshot_id} сохранена", "id": snapshot_id}, status_code=201)
 
     def history(self) -> Response:
@@ -130,7 +141,9 @@ class InventoryHandler:
         return JSONResponse({"snapshots": self._call(read)}, headers={"Cache-Control": "no-store"})
 
     def delete_snapshot(self, snapshot_id: int) -> Response:
-        return self._changed(lambda: self.repository.delete_snapshot(snapshot_id), "Инвентаризация удалена")
+        return self._changed(
+            lambda: self.repository.delete_snapshot(snapshot_id), "Инвентаризация удалена", object_id=snapshot_id
+        )
 
     def import_excel(
         self,
@@ -141,8 +154,10 @@ class InventoryHandler:
             importer = InventoryExcelImporter()
             items = importer.parse(file.file.read(importer.max_file_size + 1), file.filename or "")
             if not fingerprint:
+                logger.debug("Предварительная сверка импорта: строк %s", len(items))
                 return {"preview": self.repository.preview_import(items)}
             result = self.repository.import_items(items, fingerprint)
+            logger.info("Импорт товаров завершён: добавлено %s, обновлено %s", result["added"], result["updated"])
             return {"detail": f"Добавлено: {result['added']}. Обновлено: {result['updated']}."}
 
         try:

@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import date
 from io import BytesIO
@@ -8,6 +9,8 @@ from openpyxl import load_workbook
 from pydantic import ValidationError
 
 from .models import InventoryItem
+
+logger = logging.getLogger(__name__)
 
 
 class InventoryExcelImporter:
@@ -81,6 +84,7 @@ class InventoryExcelImporter:
                     raise ValueError("За один импорт допускается до 10 000 товаров.")
             if not items:
                 raise ValueError("В файле нет товаров.")
+            logger.info("Excel инвентаризации прочитан: строк товаров %s", len(items))
             return items
         finally:
             workbook.close()

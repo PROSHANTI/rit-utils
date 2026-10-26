@@ -377,3 +377,9 @@ uv run python -m src.inventory_demo
 копия в `/home/umbrel/umbrel/home/Backups/Inventory/inventory.sqlite3` и в Nextcloud `RIT/Backups/inventory.sqlite3`.
 Проверяются `PRAGMA integrity_check`, обратное скачивание с SHA-256 и размер файла в WebDAV-индексе.
 Статус последнего запуска находится рядом с локальной копией в `status.json`.
+
+Операции инвентаризации логируются через `logging.getLogger(__name__)` в общий stdout приложения
+с временем, уровнем, модулем и функцией. На INFO видны успешные изменения с ID, итог импорта и генерация PDF;
+на WARNING — отклонённые действия, на ERROR — ошибки SQLite/файлов с traceback. Данные товаров, цены,
+количество, содержимое Excel, cookies и CSRF-токены в сообщения не включаются. Подробности чтения
+и локальных резервных копий доступны при `LOG_LEVEL=DEBUG`.

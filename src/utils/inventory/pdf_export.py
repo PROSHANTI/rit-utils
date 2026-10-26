@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date, datetime
 from io import BytesIO
 from xml.sax.saxutils import escape
@@ -12,6 +13,8 @@ from reportlab.platypus import Flowable, LongTable, PageBreak, Paragraph, Simple
 from src.utils.one_alma.pdf_export import InventoryPdfExporter as OneAlmaPdfExporter
 
 from .models import COLUMNS, ExpiryPolicy, StoredItem
+
+logger = logging.getLogger(__name__)
 
 
 class InventoryPdfExporter:
@@ -54,6 +57,7 @@ class InventoryPdfExporter:
             author="ReInTa Clinic",
         )
         document.build(story, onFirstPage=self._page_number, onLaterPages=self._page_number)
+        logger.info("PDF инвентаризации сформирован: текущих позиций %s, снимков истории %s", len(items), len(history or []))
         return output.getvalue()
 
     @staticmethod
