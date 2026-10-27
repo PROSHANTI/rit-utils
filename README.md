@@ -219,22 +219,6 @@ uv run pytest tests/test_auth_login.py
 uv run pytest tests/test_auth_login.py::TestLoginHandler::test_login_success
 ```
 
-### 🗂️ Структура тестов
-
-```
-tests/
-├── conftest.py                     # Фикстуры и конфигурация pytest
-├── test_auth_login.py              # Тесты аутентификации
-├── test_auth_cookie_utils.py       # Тесты cookie утилит
-├── test_utils_email.py             # Тесты отправки email
-├── test_utils_gen_cert.py          # Тесты генерации сертификатов
-├── test_utils_doctor_form.py       # Тесты форм врачей
-├── test_utils_remove_bg.py        # Тесты удаления фона с изображений
-├── test_integration_endpoints.py   # Интеграционные тесты API
-├── test_main.py                    # Тесты основного модуля
-└── test_config.py                  # Тесты конфигурации
-```
-
 ### ✨ Особенности тестирования
 
 - ✅ **Без запуска сервера** - все тесты работают изолированно
