@@ -10,6 +10,10 @@
     const productForm = document.getElementById('product-form');
     const importDialog = document.getElementById('import-dialog');
     const importForm = document.getElementById('import-form');
+    let importFingerprint = '';
+    let importValid = false;
+    const importSubmit = document.getElementById('import-submit');
+    const importPreview = document.getElementById('import-preview');
     const csrfToken = container.dataset.csrfToken;
     const countEditor = document.getElementById('count-editor');
     const countForm = document.getElementById('count-form');
@@ -277,7 +281,7 @@
     document.getElementById('add-product').addEventListener('click', () => { openProduct(); });
     document.getElementById('import-products').addEventListener('click', () => {
         importForm.reset();
-        importForm.querySelector('.dialog-status').textContent = '';
+        resetImport();
         importDialog.showModal();
     });
     container.querySelectorAll('.close-dialog').forEach(button => {
@@ -307,9 +311,73 @@
         const id = productForm.dataset.productId;
         submitForm(productForm, id ? `/one_alma/products/${id}` : '/one_alma/products', id ? 'PUT' : 'POST');
     });
-    importForm.addEventListener('submit', event => {
+    function resetImport() {
+        importFingerprint = '';
+        importValid = false;
+        importPreview.hidden = true;
+        importPreview.replaceChildren();
+        importDialog.classList.remove('has-preview');
+        importForm.querySelector('.dialog-status').textContent = '';
+        importSubmit.textContent = 'Проверить файл';
+        importSubmit.disabled = false;
+    }
+    importForm.elements.file.addEventListener('change', resetImport);
+
+    function renderImportPreview(preview) {
+        importPreview.replaceChildren();
+        const summary = document.createElement('p');
+        summary.className = 'import-summary';
+        summary.textContent = preview.already_imported ? 'Эта поставка уже загружена. Остатки не изменятся.' :
+            `Новых позиций: ${preview.added}. Пополнятся: ${preview.updated}. Приход: ${preview.quantity} шт.`;
+        importPreview.appendChild(summary);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'import-preview-scroll';
+        const table = document.createElement('table');
+        table.className = 'import-preview-table';
+        const head = table.createTHead().insertRow();
+        ['Строка', 'Артикул', 'Наименование', 'Объём', 'Годен до', 'Приход', 'Было → станет', 'Результат'].forEach(label => {
+            const cell = document.createElement('th');
+            cell.textContent = label;
+            head.appendChild(cell);
+        });
+        const body = table.createTBody();
+        preview.rows.forEach(item => {
+            const row = body.insertRow();
+            row.classList.toggle('import-invalid', Boolean(item.error));
+            const result = item.error || (preview.already_imported ? 'Уже загружено' : item.action);
+            const values = [item.row, item.article, item.name, item.volume, item.expiry, item.quantity,
+                item.error || preview.already_imported ? '—' : `${item.before} → ${item.after}`, result];
+            values.forEach(value => { const cell = row.insertCell(); cell.textContent = value ?? '—'; });
+        });
+        wrapper.appendChild(table);
+        importPreview.appendChild(wrapper);
+        importPreview.hidden = false;
+        importDialog.classList.add('has-preview');
+        importValid = preview.valid && !preview.already_imported;
+        importFingerprint = importValid ? preview.fingerprint : '';
+        importSubmit.textContent = 'Импортировать';
+        importForm.querySelector('.dialog-status').textContent = preview.valid ? '' : 'Исправьте подсвеченные строки в Excel и выберите файл заново.';
+    }
+
+    importForm.addEventListener('submit', async event => {
         event.preventDefault();
-        submitForm(importForm, '/one_alma/import', 'POST');
+        if (busy) return;
+        const body = new FormData(importForm);
+        body.set('csrf_token', csrfToken);
+        if (importFingerprint) body.set('fingerprint', importFingerprint);
+        setBusy(true);
+        const message = importForm.querySelector('.dialog-status');
+        message.textContent = importFingerprint ? 'Сохраняю приход…' : 'Проверяю файл…';
+        try {
+            const data = await api('/one_alma/import', {method: 'POST', body});
+            if (data.preview) renderImportPreview(data.preview);
+            else { window.location.reload(); return; }
+        } catch (error) {
+            message.textContent = errorMessage(error);
+        } finally {
+            setBusy(false);
+            importSubmit.disabled = !importPreview.hidden && !importValid;
+        }
     });
 
     async function deleteProducts(ids) {

@@ -1,8 +1,12 @@
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 COLUMNS = (
     "№",
@@ -55,10 +59,55 @@ class NewProduct:
         return f"{price:.2f}".replace(".", ",")
 
 
+class ShipmentItem(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    article: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=300)
+    volume: str = Field(min_length=1, max_length=64)
+    expiry: str
+    central_bank_price: str = ""
+    wholesale_price: str = ""
+    market_price: str = ""
+    quantity: int = Field(strict=True, ge=1, le=1000)
+
+    @field_validator("article", "name", "volume", mode="before")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("expiry")
+    @classmethod
+    def expiry_month(cls, value: str) -> str:
+        try:
+            return datetime.strptime(value, "%m.%Y" if "." in value else "%Y-%m").strftime("%m.%Y")
+        except ValueError:
+            raise ValueError("Укажите срок годности: месяц и год.") from None
+
+    @field_validator("central_bank_price", "wholesale_price", "market_price")
+    @classmethod
+    def price(cls, value: str) -> str:
+        return NewProduct._format_price(value)
+
+    def to_product(self, position: int = 1) -> NewProduct:
+        return NewProduct(position=position, **self.model_dump())
+
+
+def product_key(cells: tuple[str, ...]) -> tuple[str, str, str]:
+    """A delivery replenishes only the same article, volume and expiry month."""
+    return cells[1].strip().casefold(), re.sub(r"\s+", "", cells[3]).casefold(), cells[4]
+
+
+def shipment_fingerprint(products: list[NewProduct]) -> str:
+    canonical = sorted([list(product.to_cells()[1:]) + [product.quantity] for product in products])
+    return hashlib.sha256(json.dumps(canonical, ensure_ascii=False).encode()).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class ImportResult:
     added: int
     updated: int
+    already_imported: bool = False
 
 
 @dataclass(frozen=True, slots=True)

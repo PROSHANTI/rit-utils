@@ -1,18 +1,66 @@
 import re
-from datetime import date, datetime
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import date
 from io import BytesIO
+from uuid import UUID, uuid4
 from zipfile import BadZipFile, ZipFile
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from pydantic import ValidationError
 
-from .models import NewProduct
+from .models import NewProduct, ShipmentItem, shipment_fingerprint
+
+IMPORT_HEADERS = ("Артикул", "Наименование", "Объём", "Годен до", "Цена ЦБ", "Цена опт", "Цена магазина", "Количество")
+
+
+@dataclass(frozen=True)
+class Shipment:
+    products: list[NewProduct]
+    rows: list[dict[str, object]]
+    fingerprint: str
+    receipt_id: str
+
+    @property
+    def valid(self) -> bool:
+        return bool(self.products) and all(not row["error"] for row in self.rows)
 
 
 class ExcelProductImporter:
     max_file_size = 5 * 1024 * 1024
     max_rows = 2000
 
+    @staticmethod
+    def template() -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        assert sheet is not None
+        sheet.title = "Импорт"
+        sheet.append(IMPORT_HEADERS)
+        sheet.freeze_panes = "A2"
+        for column in "ABCDEFGH":
+            sheet.column_dimensions[column].width = 22 if column != "B" else 55
+        sheet.column_dimensions["A"].number_format = "@"
+        metadata = workbook.create_sheet("_OneAlma")
+        metadata.append(["shipment_id", str(uuid4())])
+        metadata.sheet_state = "hidden"
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+        return output.getvalue()
+
     def parse(self, content: bytes, filename: str) -> list[NewProduct]:
+        shipment = self.inspect(content, filename)
+        self.require_valid(shipment)
+        return shipment.products
+
+    @staticmethod
+    def require_valid(shipment: Shipment) -> None:
+        errors = [f"Строка {row['row']}: {row['error']}" for row in shipment.rows if row["error"]]
+        if errors:
+            raise ValueError("\n".join(errors) + " Импорт отменён.")
+
+    def inspect(self, content: bytes, filename: str) -> Shipment:
         if not filename.lower().endswith(".xlsx"):
             raise ValueError("Загрузите файл .xlsx.")
         if len(content) > self.max_file_size:
@@ -21,52 +69,77 @@ class ExcelProductImporter:
         try:
             workbook = load_workbook(BytesIO(content), read_only=True, data_only=False, keep_links=False)
         except Exception:
-            # XML/ZIP exception types depend on openpyxl's installed parser.
             raise ValueError("Не удалось прочитать Excel. Проверьте формат .xlsx.") from None
         try:
             sheet = workbook.worksheets[0]
             if (sheet.max_row or 0) > self.max_rows + 20 or (sheet.max_column or 0) > 30:
                 raise ValueError("В файле допускается до 2000 строк товаров и 30 колонок.")
             headers = None
-            products = []
+            products: list[NewProduct] = []
+            rows: list[dict[str, object]] = []
             for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
                 if headers is None:
                     candidate = self._headers(row)
-                    if len(candidate) >= 8:
+                    if candidate:
                         headers = candidate
                     elif row_number > 10:
-                        raise ValueError("Не найдены заголовки. Используйте шаблон из памятки.")
+                        break
                     continue
-                if not any(value is not None for value in row) or str(row[0]).upper().startswith("ИТОГО"):
+                if not any(value is not None and str(value).strip() for value in row):
                     continue
+                if str(row[0]).upper().startswith("ИТОГО"):
+                    continue
+                values = {field: row[column] for field, column in headers.items()}
+                view: dict[str, object] = {field: self._text(value)[:300] for field, value in values.items()}
+                view.update(row=row_number, error="")
                 try:
-                    values = {field: row[column] for field, column in headers.items()}
                     if any(isinstance(value, str) and value.startswith("=") for value in values.values()):
                         raise ValueError("Формулы не поддерживаются: вставьте их значения.")
-                    product = NewProduct(
-                        position=self._integer(values["position"]),
-                        article=self._text(values["article"]),
-                        name=self._text(values["name"]),
-                        volume=self._text(values["volume"]),
+                    item = ShipmentItem(
+                        **{field: self._text(value) for field, value in values.items() if field not in ("quantity", "expiry")},
                         expiry=self._expiry(values["expiry"]),
-                        central_bank_price=self._text(values["central_bank_price"]),
-                        wholesale_price=self._text(values["wholesale_price"]),
-                        market_price=self._text(values["market_price"]),
-                        quantity=self._integer(values.get("quantity", 2)),
+                        quantity=self._integer(values["quantity"]),
                     )
-                    if len(product.article) > 64 or len(product.name) > 300 or len(product.volume) > 64:
-                        raise ValueError("Слишком длинный артикул, название или объём.")
-                    product.to_cells()
-                    products.append(product)
-                except (ValueError, TypeError, KeyError) as exc:
-                    raise ValueError(f"Строка {row_number}: {exc}") from None
-            if not products:
+                    products.append(item.to_product())
+                    view.update(item.model_dump())
+                except ValidationError as exc:
+                    labels = dict(zip(ShipmentItem.model_fields, IMPORT_HEADERS))
+                    view["error"] = "; ".join(
+                        f"{labels.get(str(error['loc'][0]), str(error['loc'][0]))}: {self._validation_message(error)}"
+                        for error in exc.errors()
+                    )
+                except (ValueError, TypeError) as exc:
+                    view["error"] = str(exc)
+                rows.append(view)
+            if not headers:
+                raise ValueError("Не найдены заголовки. Скачайте шаблон импорта.")
+            if not rows:
                 raise ValueError("В файле нет товаров.")
-            if len(products) > self.max_rows or sum(product.quantity for product in products) > 10000:
+            if len(rows) > self.max_rows or sum(product.quantity for product in products) > 10000:
                 raise ValueError("За один импорт допускается до 2000 позиций и 10000 штук.")
-            return products
+            fingerprint = shipment_fingerprint(products)
+            receipt_id = "content:" + fingerprint
+            if "_OneAlma" in workbook.sheetnames:
+                metadata = workbook["_OneAlma"]
+                if metadata["A1"].value != "shipment_id":
+                    raise ValueError("Повреждён идентификатор поставки. Скачайте новый шаблон.")
+                try:
+                    receipt_id = str(UUID(str(metadata["B1"].value)))
+                except ValueError:
+                    raise ValueError("Повреждён идентификатор поставки. Скачайте новый шаблон.") from None
+            return Shipment(products, rows, fingerprint, receipt_id)
         finally:
             workbook.close()
+
+    @staticmethod
+    def _validation_message(error: Mapping) -> str:
+        if error["type"] in ("greater_than_equal", "less_than_equal", "int_type"):
+            return "укажите целое число от 1 до 1000"
+        if error["type"] == "string_too_short":
+            return "заполните поле"
+        if error["type"] == "string_too_long":
+            return "слишком длинное значение"
+        return str(error.get("msg", "Проверьте значение.")).removeprefix("Value error, ")
 
     @staticmethod
     def _validate_archive(content: bytes) -> None:
@@ -80,7 +153,6 @@ class ExcelProductImporter:
     @staticmethod
     def _headers(row: tuple[object, ...]) -> dict[str, int]:
         aliases = {
-            "position": ("№", "№п/п"),
             "article": ("арт.", "артикул"),
             "name": ("наименование", "наименованиепрепарата"),
             "volume": ("объем",),
@@ -98,18 +170,20 @@ class ExcelProductImporter:
                     if field in result:
                         raise ValueError("В Excel повторяются колонки.")
                     result[field] = column
-        required = set(aliases) - {"quantity"}
+        required = set(aliases)
         return result if required <= result.keys() else {}
 
     @staticmethod
     def _text(value: object) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
         return "" if value is None else str(value).strip()
 
     @staticmethod
     def _integer(value: object) -> int:
         text = str(value)
         if not re.fullmatch(r"\d+(?:\.0+)?", text):
-            raise ValueError("Номер и количество должны быть целыми положительными числами.")
+            raise ValueError("Количество должно быть целым положительным числом.")
         return int(text.split(".", 1)[0])
 
     @staticmethod
@@ -117,6 +191,4 @@ class ExcelProductImporter:
         if isinstance(value, date):
             return value.strftime("%Y-%m")
         text = str(value)
-        if re.fullmatch(r"\d{2}\.\d{4}", text):
-            return datetime.strptime(text, "%m.%Y").strftime("%Y-%m")
         return text

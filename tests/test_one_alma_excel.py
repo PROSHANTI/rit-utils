@@ -1,10 +1,9 @@
 from datetime import datetime
 from io import BytesIO
-from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from src.utils.one_alma.excel_import import ExcelProductImporter
 
@@ -32,27 +31,55 @@ def test_import_reads_all_columns_and_quantities_and_leading_zero():
 
     assert len(products) == 1
     assert products[0].quantity == 3
-    assert products[0].to_cells() == ("26", "0001", "Крем", "50 мл", "09.2028", "100,25", "—", "250,10")
+    assert products[0].to_cells() == ("1", "0001", "Крем", "50 мл", "09.2028", "100,25", "—", "250,10")
 
 
-def test_original_emansi_table_is_supported_without_modification():
-    source = Path("src/utils/Sroki_i_Ceny_za_edinitsu_Emansi.xlsx")
-    if not source.exists():
-        pytest.skip("Original private workbook is not required in CI")
-
-    products = ExcelProductImporter().parse(source.read_bytes(), source.name)
-
-    assert len(products) == 25
-    assert sum(product.quantity for product in products) == 50
-    assert products[12].article == "0262"
-
-
-def test_quantity_defaults_to_two_when_column_missing():
+def test_quantity_column_is_required_for_deliveries():
     content = excel_bytes([[26, "0001", "Крем", "50 мл", "09.2028", 100, 200, 300]], HEADERS[:-1])
 
-    products = ExcelProductImporter().parse(content, "products.xlsx")
+    with pytest.raises(ValueError, match="заголовки"):
+        ExcelProductImporter().parse(content, "products.xlsx")
 
-    assert products[0].quantity == 2
+
+def test_number_is_not_required_and_does_not_affect_fingerprint():
+    row = ["0001", "Крем", "50 мл", "09.2028", 100, None, None, 3]
+    importer = ExcelProductImporter()
+
+    current = importer.inspect(excel_bytes([row], HEADERS[1:]), "delivery.xlsx")
+    legacy = importer.inspect(excel_bytes([[999] + row]), "old.xlsx")
+
+    assert current.valid and current.products == legacy.products
+    assert current.fingerprint == legacy.fingerprint
+
+
+def test_validation_collects_every_bad_row():
+    row = ["0001", "Крем", "50 мл", "09.2028", 100, None, None, 3]
+    content = excel_bytes(
+        [row, ["", "Крем", "50 мл", "09.2028", -1, None, None, 0], row[:3] + ["99.2028"] + row[4:]], HEADERS[1:]
+    )
+
+    shipment = ExcelProductImporter().inspect(content, "delivery.xlsx")
+
+    assert not shipment.valid
+    assert [row["row"] for row in shipment.rows if row["error"]] == [3, 4]
+    assert "Артикул" in str(shipment.rows[1]["error"]) and "Цена ЦБ" in str(shipment.rows[1]["error"])
+    assert "Количество" in str(shipment.rows[1]["error"])
+    assert "срок годности" in str(shipment.rows[2]["error"])
+
+
+def test_new_templates_have_distinct_delivery_ids_and_no_number_column():
+    first = ExcelProductImporter.template()
+    second = ExcelProductImporter.template()
+    books = [load_workbook(BytesIO(content)) for content in (first, second)]
+
+    headers = [cell.value for cell in books[0].worksheets[0][1]]
+
+    assert headers == HEADERS[1:]
+    assert books[0].worksheets[0].max_row == 1
+    assert books[0]["_OneAlma"].sheet_state == "hidden"
+    assert books[0]["_OneAlma"]["B1"].value != books[1]["_OneAlma"]["B1"].value
+    for book in books:
+        book.close()
 
 
 def test_showcase_columns_are_never_read_from_excel():
@@ -62,7 +89,7 @@ def test_showcase_columns_are_never_read_from_excel():
     products = ExcelProductImporter().parse(content, "products.xlsx")
 
     assert len(products) == 1 and products[0].quantity == 3
-    assert products[0].to_cells() == ("26", "0001", "Крем", "50 мл", "09.2028", "100,00", "200,00", "300,00")
+    assert products[0].to_cells() == ("1", "0001", "Крем", "50 мл", "09.2028", "100,00", "200,00", "300,00")
 
 
 @pytest.mark.parametrize(
@@ -88,7 +115,7 @@ def test_invalid_rows_report_line_and_prevent_import(row):
     [
         (b"not excel", "products.xlsx", "Некорректный"),
         (b"", "products.xls", ".xlsx"),
-        (excel_bytes([], ["wrong"]), "products.xlsx", "нет товаров"),
+        (excel_bytes([], ["wrong"]), "products.xlsx", "заголовки"),
     ],
 )
 def test_bad_workbook_and_missing_headers_have_safe_errors(content, filename, error):

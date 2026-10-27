@@ -6,9 +6,9 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=sales-1">
-    <script src="/static/one_alma_expiry.js?v=sales-1" defer></script>
-    <script src="/static/one_alma.js?v=sales-1" defer></script>
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=delivery-2">
+    <script src="/static/one_alma_expiry.js?v=delivery-2" defer></script>
+    <script src="/static/one_alma.js?v=delivery-2" defer></script>
 </head>
 <body class="inventory-page">
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
@@ -103,7 +103,7 @@
             <form id="product-form">
                 <div class="dialog-heading"><h2 id="product-dialog-title">Добавить товар</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
                 <div class="product-form-grid">
-                    <div><label for="product-position">№</label><input id="product-position" name="position" type="number" min="1" max="999999" value="{{ inventory.next_position }}" placeholder="26" required></div>
+                    <div><label for="product-position">№</label><input id="product-position" name="position" readonly type="number" min="1" max="999999" value="{{ inventory.next_position }}" placeholder="26" required></div>
                     <div><label for="product-article">Артикул</label><input id="product-article" name="article" maxlength="64" placeholder="8986" required></div>
                     <div class="wide-field"><label for="product-name">Наименование препарата</label><input id="product-name" name="name" maxlength="300" placeholder="Крем для увлажнения кожи" required></div>
                     <div><label for="product-volume">Объём</label><input id="product-volume" name="volume" maxlength="64" placeholder="150 мл" required></div>
@@ -120,21 +120,12 @@
         <dialog id="import-dialog" class="inventory-dialog">
             <form id="import-form">
                 <div class="dialog-heading"><h2>Импорт товаров</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
-                <p class="import-help">Файл <strong>.xlsx</strong>, первый лист. Заголовки:</p>
-                <p class="import-columns">№ · Артикул · Наименование · Объём · Годен до · Цена ЦБ · Цена опт · Цена магазина · Количество</p>
-                <ul class="import-help">
-                    <li>Каждая следующая строка — один товар. Позиция с тем же № обновится, с новым № — добавится. В файле номера не должны повторяться.</li>
-                    <li>Годен до: <strong>09.2028</strong>. Цены: <strong>1343,43</strong> или <strong>1343.43</strong>, без ₽.</li>
-                    <li>Пустая цена означает, что цена неизвестна; при обновлении она очистит прежнюю цену. Артикулы с начальным нулём храните как текст.</li>
-                    <li>Количество — общее число штук, включая проданные. Оно заменит текущее количество; отметки продаж сохранятся. Указать меньше уже проданного нельзя. Без этой колонки количество будет 2.</li>
-                    <li>История продаж, покупатели, дата и цена продажи из Excel не загружаются и не перезаписываются.</li>
-                    <li>Витрина не загружается из Excel: у новых позиций 0, ручное количество существующих сохраняется в пределах остатка. При уменьшении остатка витрина не может превышать его.</li>
-                    <li>Поддерживается и исходная таблица Emansi с её заголовками. При ошибке импорт целиком отменяется.</li>
-                </ul>
-                <label for="import-file">Excel с товарами, до 5 МБ</label>
+                <p class="import-template"><a href="/one_alma/import/template">Скачать шаблон Excel</a></p>
+                <label for="import-file">Файл поставки .xlsx, до 5 МБ</label>
                 <input id="import-file" name="file" type="file" accept=".xlsx" required>
+                <div id="import-preview" hidden aria-live="polite"></div>
                 <p class="dialog-status" role="status"></p>
-                <button type="submit">Импортировать</button>
+                <button type="submit" id="import-submit">Проверить файл</button>
             </form>
         </dialog>
 <dialog class="inventory-dialog sales-dialog" id="sale-dialog" aria-labelledby="sale-heading"><form id="sale-form"><div class="dialog-heading"><h2 id="sale-heading">Продажа</h2><button class="close-dialog" type="button" data-close aria-label="Закрыть продажу">×</button></div><p class="product-context" id="sale-context"></p><div class="product-form-grid"><div><label for="sale-article">Артикул</label><input id="sale-article" readonly></div><div><label for="sale-date">Дата продажи · Москва, UTC+3</label><input id="sale-date" readonly></div><div class="wide-field"><label for="sale-customer">Кому</label><input id="sale-customer" maxlength="200" placeholder="Имя, компания или пометка" autocomplete="off"></div><div class="wide-field"><label for="sale-price">Цена за 1 шт., ₽</label><input id="sale-price" inputmode="decimal" placeholder="—" maxlength="24"><p class="field-note" id="sale-price-note"></p><p class="error" id="sale-price-error" role="alert"></p></div><div class="wide-field"><div class="quantity-line"><label for="sale-quantity">Количество, шт.</label><div class="count-stepper"><button type="button" id="sale-minus" aria-label="Уменьшить количество">−</button><input id="sale-quantity" value="1" type="number" min="1" step="1" required><button type="button" id="sale-plus" aria-label="Увеличить количество">+</button></div></div><p class="field-note" id="sale-stock"></p><p class="error" id="sale-quantity-error" role="alert"></p></div></div><div class="sale-total"><span>Сумма продажи</span><strong id="sale-total">—</strong></div><p class="error" id="sale-error" role="alert"></p><div class="dialog-actions"><button type="button" class="quiet" id="sale-history">История</button><button type="submit" class="primary" id="sale-save">Оформить продажу</button></div></form></dialog>

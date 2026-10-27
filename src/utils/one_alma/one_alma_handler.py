@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from .excel_import import ExcelProductImporter
 from .expiry import get_expiry_info
-from .models import COLUMNS, Inventory, NewProduct, format_cents
+from .models import COLUMNS, Inventory, NewProduct, format_cents, product_key
 from .pdf_export import InventoryPdfExporter
 from .repository import InventoryRepository
 
@@ -196,26 +196,59 @@ class OneAlmaHandler:
             raise HTTPException(status_code=503, detail="Не удалось удалить товары. Попробуйте позже.") from None
         return JSONResponse({"detail": "Товары удалены"})
 
-    def import_products(self, request: Request, file: UploadFile, csrf_token: str) -> Response:
+    @staticmethod
+    def import_template() -> Response:
+        return Response(
+            ExcelProductImporter.template(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="one_alma_delivery.xlsx"', "Cache-Control": "no-store"},
+        )
+
+    def import_products(self, request: Request, file: UploadFile, csrf_token: str, fingerprint: str = "") -> Response:
         self._check_csrf(request, csrf_token)
         try:
             importer = ExcelProductImporter()
-            content = file.file.read(importer.max_file_size + 1)
-            products = importer.parse(content, file.filename or "")
-            result = self.repository.import_products(products)
+            shipment = importer.inspect(file.file.read(importer.max_file_size + 1), file.filename or "")
+            if not fingerprint:
+                preview = self.repository.preview_import(shipment.products, shipment.receipt_id)
+                plan = {product_key(item["cells"]): item for item in preview.pop("rows")}
+                for row in shipment.rows:
+                    if not row["error"]:
+                        key = (
+                            str(row["article"]).strip().casefold(),
+                            "".join(str(row["volume"]).split()).casefold(),
+                            str(row["expiry"]),
+                        )
+                        item = plan[key]
+                        row.update(
+                            {field: item[field] for field in ("position", "before", "incoming", "after", "action", "error")}
+                        )
+                preview.update(
+                    rows=shipment.rows,
+                    fingerprint=shipment.fingerprint,
+                    valid=shipment.valid and all(not row["error"] for row in shipment.rows),
+                )
+                return JSONResponse({"preview": preview}, headers={"Cache-Control": "no-store"})
+            importer.require_valid(shipment)
+            if fingerprint != shipment.fingerprint:
+                raise ValueError("Файл изменился. Проверьте его ещё раз перед импортом.")
+            result = self.repository.import_products(shipment.products, shipment.receipt_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except sqlite3.IntegrityError:
-            raise HTTPException(
-                status_code=409, detail="Не удалось согласовать позиции. Обновите страницу и повторите импорт."
-            ) from None
+            raise HTTPException(status_code=409, detail="Не удалось согласовать поставку. Проверьте файл ещё раз.") from None
         except sqlite3.Error:
             logger.exception("Не удалось импортировать товары OneAlma")
             raise HTTPException(status_code=503, detail="Не удалось сохранить импорт. Попробуйте позже.") from None
         finally:
             file.file.close()
+        detail = (
+            "Эта поставка уже загружена. Остатки не изменены."
+            if result.already_imported
+            else f"Добавлено позиций: {result.added}. Пополнено позиций: {result.updated}."
+        )
         return JSONResponse(
-            {"detail": f"Добавлено позиций: {result.added}. Обновлено позиций: {result.updated}."}, status_code=201
+            {"detail": detail}, status_code=200 if result.already_imported else 201, headers={"Cache-Control": "no-store"}
         )
 
     def download_pdf(self, sort: int = 0, descending: bool = False) -> Response:

@@ -2,10 +2,11 @@ import re
 from io import BytesIO
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from pypdf import PdfReader
 
 from src.main import application
+from src.utils.one_alma.excel_import import IMPORT_HEADERS
 from src.utils.one_alma.repository import InventoryRepository
 
 
@@ -179,7 +180,7 @@ def test_csrf_rejects_mutations_without_changing_database(authenticated_client, 
     assert inventory_repository.snapshot() == before
 
 
-@pytest.mark.parametrize("changes, status", [({"position": "1"}, 409), ({"market_price": "-1"}, 422), ({"quantity": "-1"}, 422)])
+@pytest.mark.parametrize("changes, status", [({"market_price": "-1"}, 422), ({"quantity": "-1"}, 422)])
 def test_duplicate_position_and_invalid_fields_do_not_mutate(authenticated_client, inventory_repository, csrf, changes, status):
     before = inventory_repository.snapshot()
     data = product_data(csrf) | changes
@@ -259,37 +260,49 @@ def test_missing_product_count_returns_not_found(authenticated_client, inventory
     assert inventory_repository.snapshot() == before
 
 
-def test_excel_extra_showcase_column_is_ignored_and_manual_value_survives_reimport(
-    authenticated_client, inventory_repository, csrf
-):
-    inventory_repository.set_showcase_quantity(1, 1)
-    headers = [
-        "№",
-        "Артикул",
-        "Наименование",
-        "Объём",
-        "Годен до",
-        "Цена ЦБ",
-        "Цена опт",
-        "Цена магазина",
-        "Количество",
-        "Витрина",
-    ]
-    file = excel_file(
-        [1, "0001", "Обновлённый крем", "50 мл", "09.2028", 100, None, None, 3, 99],
-        [26, "0002", "Новый крем", "50 мл", "09.2028", 200, None, None, 4, "=1+1"],
-        headers=headers,
+def confirm_import(client, csrf, file):
+    preview = client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+    assert preview.status_code == 200
+    return client.post(
+        "/one_alma/import",
+        data={"csrf_token": csrf, "fingerprint": preview.json()["preview"]["fingerprint"]},
+        files={"file": file},
     )
 
+
+def test_excel_preview_does_not_change_inventory_and_shows_replenishment(authenticated_client, inventory_repository, csrf):
+    first = inventory_repository.snapshot().products[0]
+    row = list(first.cells[1:]) + [3]
+    file = excel_file(row, headers=list(IMPORT_HEADERS))
+    before = inventory_repository.snapshot()
+
     response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
-    repeated = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+
+    preview = response.json()["preview"]
+    assert response.status_code == 200 and preview["valid"]
+    assert (preview["added"], preview["updated"], preview["quantity"]) == (0, 1, 3)
+    assert (preview["rows"][0]["before"], preview["rows"][0]["after"]) == (2, 5)
+    assert inventory_repository.snapshot() == before
+
+
+def test_excel_extra_fields_are_ignored_and_showcase_sales_prices_survive(authenticated_client, inventory_repository, csrf):
+    inventory_repository.set_showcase_quantity(1, 1)
+    inventory_repository.set_sold_count(1, 1)
+    before = inventory_repository.snapshot()
+    first = before.products[0]
+    row = list(first.cells[1:]) + [3, 99, "=1+1", "Someone"]
+    row[4] = 999
+    file = excel_file(row, headers=list(IMPORT_HEADERS) + ["Витрина", "Продано", "Кому"])
+
+    response = confirm_import(authenticated_client, csrf, file)
+    repeated = confirm_import(authenticated_client, csrf, file)
 
     inventory = inventory_repository.snapshot()
-    assert response.status_code == repeated.status_code == 201
-    assert inventory.products[0].showcase_quantity == 1
-    assert inventory.products[-1].showcase_quantity == 0
-    assert inventory.products[-1].available == 4
-    assert (len(inventory.products), inventory.total) == (26, 55)
+    assert response.status_code == 201 and repeated.status_code == 200
+    assert inventory.products[0].cells == first.cells
+    assert inventory.products[0].showcase_quantity == inventory.products[0].sold_count == 1
+    assert inventory.products[0].units[:2] == first.units
+    assert (len(inventory.products), inventory.total) == (25, 53)
 
 
 def test_pdf_accepts_showcase_sort_and_contains_display_quantity(authenticated_client, inventory_repository, csrf):
@@ -303,79 +316,114 @@ def test_pdf_accepts_showcase_sort_and_contains_display_quantity(authenticated_c
 
 
 def test_excel_upload_repeated_file_preserves_counts_ids_and_sales(authenticated_client, inventory_repository, csrf):
-    file = excel_file([26, "0001", "Крем из Excel", "50 мл", "09.2028", 100, 200, 300, 4])
-    response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+    file = excel_file(["0001", "Крем из Excel", "50 мл", "09.2028", 100, 200, 300, 4], headers=list(IMPORT_HEADERS))
+    response = confirm_import(authenticated_client, csrf, file)
     added = inventory_repository.snapshot().products[-1]
-    sale = authenticated_client.post(f"/one_alma/units/{added.units[-1].id}", data={"sold": "true", "csrf_token": csrf})
+    inventory_repository.set_sold(added.units[-1].id, True)
     before = inventory_repository.snapshot()
 
-    repeated = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+    repeated = confirm_import(authenticated_client, csrf, file)
 
     assert response.status_code == 201
-    assert response.json()["detail"] == "Добавлено позиций: 1. Обновлено позиций: 0."
-    assert before.total == 54
-    assert added.cells[1] == "0001"
-    assert sale.status_code == 200
-    assert repeated.status_code == 201
-    assert repeated.json()["detail"] == "Добавлено позиций: 0. Обновлено позиций: 1."
+    assert response.json()["detail"] == "Добавлено позиций: 1. Пополнено позиций: 0."
+    assert before.total == 54 and added.cells[:2] == ("26", "0001")
+    assert repeated.status_code == 200
+    assert "уже загружена" in repeated.json()["detail"]
     assert InventoryRepository(inventory_repository.database).snapshot() == before
 
 
-def test_excel_upload_updates_existing_fields_and_adds_new_position(authenticated_client, inventory_repository, csrf):
-    initial = inventory_repository.snapshot()
-    first = initial.products[0]
-    inventory_repository.set_sold(first.units[-1].id, True)
-    file = excel_file(
-        [1, "0262", "Обновлённый крем", "100 мл", "10.2029", 150, None, 350, 4],
-        [26, "0262", "Ещё одна партия", "50 мл", "09.2028", 100, 200, 300, 3],
-    )
+def test_excel_upload_without_numbers_adds_different_expiry_batch(authenticated_client, inventory_repository, csrf):
+    first = inventory_repository.snapshot().products[0]
+    row = list(first.cells[1:]) + [3]
+    different = row.copy()
+    different[3] = "10.2029"
+    file = excel_file(row, different, headers=list(IMPORT_HEADERS))
 
-    response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
+    response = confirm_import(authenticated_client, csrf, file)
 
     inventory = inventory_repository.snapshot()
-    updated = inventory.products[0]
     assert response.status_code == 201
-    assert response.json()["detail"] == "Добавлено позиций: 1. Обновлено позиций: 1."
-    assert (len(inventory.products), inventory.total, inventory.sold, inventory.available) == (26, 55, 1, 54)
-    assert updated.id == first.id
-    assert updated.cells == ("1", "0262", "Обновлённый крем", "100 мл", "10.2029", "150,00", "—", "350,00")
-    assert next(unit for unit in updated.units if unit.sold).id == first.units[-1].id
-    assert inventory.products[1:-1] == initial.products[1:]
-    assert inventory.products[-1].cells[:3] == ("26", "0262", "Ещё одна партия")
+    assert response.json()["detail"] == "Добавлено позиций: 1. Пополнено позиций: 1."
+    assert (len(inventory.products), inventory.total) == (26, 56)
+    assert inventory.products[0].cells == first.cells
+    assert inventory.products[-1].cells[0] == "26"
+    assert inventory.products[-1].cells[4] == "10.2029"
 
 
-@pytest.mark.parametrize("position", [26, "026", 26.0])
-def test_excel_upload_rejects_repeated_number_inside_file(authenticated_client, inventory_repository, csrf, position):
+def test_invalid_rows_are_listed_and_cannot_be_partially_imported(authenticated_client, inventory_repository, csrf):
     before = inventory_repository.snapshot()
     file = excel_file(
-        [1, "0001", "Обновлённый крем", "50 мл", "09.2028", 100, 200, 300, 4],
-        [26, "0002", "Новый крем", "50 мл", "09.2028", 100, 200, 300, 4],
-        [position, "0003", "Повтор номера", "50 мл", "09.2028", 100, 200, 300, 3],
+        ["0001", "Крем", "50 мл", "09.2028", 100, None, None, 4],
+        ["0002", "Ошибка количества", "50 мл", "09.2028", 100, None, None, 0],
+        ["0003", "Ошибка срока", "50 мл", "99.2028", 100, None, None, 3],
+        headers=list(IMPORT_HEADERS),
+    )
+    preview = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file}).json()["preview"]
+
+    response = authenticated_client.post(
+        "/one_alma/import", data={"csrf_token": csrf, "fingerprint": preview["fingerprint"]}, files={"file": file}
     )
 
-    response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
-
+    assert not preview["valid"]
+    assert [row["row"] for row in preview["rows"] if row["error"]] == [3, 4]
     assert response.status_code == 422
-    assert "повторяется № 26" in response.json()["detail"]
+    assert "Строка 3" in response.json()["detail"] and "Строка 4" in response.json()["detail"]
     assert inventory_repository.snapshot() == before
 
 
-def test_excel_upload_below_sold_quantity_rolls_back_entire_batch(authenticated_client, inventory_repository, csrf):
-    first = inventory_repository.snapshot().products[0]
-    for unit in first.units:
-        inventory_repository.set_sold(unit.id, True)
+def test_stock_overflow_is_highlighted_and_commit_rolls_back(authenticated_client, inventory_repository, csrf):
     before = inventory_repository.snapshot()
-    file = excel_file(
-        [26, "0001", "Новый крем", "50 мл", "09.2028", 100, 200, 300, 4],
-        [2, "0002", "Обновлённый крем", "50 мл", "09.2028", 100, 200, 300, 4],
-        [1, "0003", "Недостаточно штук", "50 мл", "09.2028", 100, 200, 300, 1],
+    row = list(before.products[0].cells[1:]) + [1000]
+    file = excel_file(row, ["NEW", "Новый", "1 мл", "01.2030", None, None, None, 2], headers=list(IMPORT_HEADERS))
+    preview = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file}).json()["preview"]
+
+    response = authenticated_client.post(
+        "/one_alma/import", data={"csrf_token": csrf, "fingerprint": preview["fingerprint"]}, files={"file": file}
     )
 
-    response = authenticated_client.post("/one_alma/import", data={"csrf_token": csrf}, files={"file": file})
-
+    assert not preview["valid"] and "1000" in preview["rows"][0]["error"]
     assert response.status_code == 422
-    assert "№ 1: количество не может быть меньше" in response.json()["detail"]
     assert inventory_repository.snapshot() == before
+
+
+def test_changed_file_after_preview_is_rejected(authenticated_client, inventory_repository, csrf):
+    before = inventory_repository.snapshot()
+    file = excel_file(["NEW", "Новый", "1 мл", "01.2030", None, None, None, 2], headers=list(IMPORT_HEADERS))
+
+    response = authenticated_client.post(
+        "/one_alma/import", data={"csrf_token": csrf, "fingerprint": "0" * 64}, files={"file": file}
+    )
+
+    assert response.status_code == 422 and "изменился" in response.json()["detail"]
+    assert inventory_repository.snapshot() == before
+
+
+def test_downloaded_template_can_import_two_identical_distinct_deliveries(authenticated_client, inventory_repository, csrf):
+    files = []
+    for _ in range(2):
+        response = authenticated_client.get("/one_alma/import/template")
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+        book = load_workbook(BytesIO(response.content))
+        book.worksheets[0].append(["NEW", "Новый", "1 мл", "01.2030", None, None, None, 2])
+        output = BytesIO()
+        book.save(output)
+        book.close()
+        files.append(("delivery.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+
+    responses = [confirm_import(authenticated_client, csrf, file) for file in files]
+
+    assert all(response.status_code == 201 for response in responses)
+    assert inventory_repository.snapshot().products[-1].available == 4
+
+
+def test_manual_add_ignores_submitted_position_and_assigns_next(authenticated_client, inventory_repository, csrf):
+    data = product_data(csrf)
+    data["position"] = "1"
+
+    response = authenticated_client.post("/one_alma/products", data=data)
+
+    assert response.status_code == 201
+    assert inventory_repository.snapshot().products[-1].cells[0] == "26"
 
 
 @pytest.mark.parametrize(
@@ -383,6 +431,7 @@ def test_excel_upload_below_sold_quantity_rolls_back_entire_batch(authenticated_
     [
         ("GET", "/one_alma"),
         ("GET", "/one_alma/pdf"),
+        ("GET", "/one_alma/import/template"),
         ("POST", "/one_alma/units/1"),
         ("POST", "/one_alma/products/1/sold"),
         ("POST", "/one_alma/products/1/showcase"),

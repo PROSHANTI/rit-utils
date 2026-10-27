@@ -161,7 +161,6 @@ class ApplicationRouter:
     def one_alma_add_product(
         self,
         request: Request,
-        position: int = Form(..., ge=1, le=999999),
         article: str = Form(..., min_length=1, max_length=64),
         name: str = Form(..., min_length=1, max_length=300),
         volume: str = Form(..., min_length=1, max_length=64),
@@ -173,7 +172,7 @@ class ApplicationRouter:
         csrf_token: str = Form(...),
     ) -> Response:
         product = NewProduct(
-            position=position,
+            position=1,
             article=article,
             name=name,
             volume=volume,
@@ -221,8 +220,17 @@ class ApplicationRouter:
     ) -> Response:
         return self.one_alma.delete_products(request, product_ids, csrf_token)
 
-    def one_alma_import(self, request: Request, file: UploadFile = File(...), csrf_token: str = Form(...)) -> Response:
-        return self.one_alma.import_products(request, file, csrf_token)
+    def one_alma_import(
+        self,
+        request: Request,
+        file: UploadFile = File(...),
+        csrf_token: str = Form(...),
+        fingerprint: str = Form("", max_length=64),
+    ) -> Response:
+        return self.one_alma.import_products(request, file, csrf_token, fingerprint)
+
+    def one_alma_import_template(self) -> Response:
+        return self.one_alma.import_template()
 
     def _register_routes(self) -> None:
         self.router.include_router(self.inventory.router, dependencies=self.dependencies)
@@ -293,6 +301,7 @@ class ApplicationRouter:
             ("/one_alma/products", self.one_alma_add_product, ["POST"], True, "Добавить товар", ["OneAlma"]),
             ("/one_alma/products/{product_id}", self.one_alma_update_product, ["PUT"], True, "Изменить товар", ["OneAlma"]),
             ("/one_alma/products", self.one_alma_delete_products, ["DELETE"], True, "Удалить товары", ["OneAlma"]),
+            ("/one_alma/import/template", self.one_alma_import_template, ["GET"], True, "Шаблон поставки", ["OneAlma"]),
             ("/one_alma/import", self.one_alma_import, ["POST"], True, "Импорт товаров из Excel", ["OneAlma"]),
         ]
         for path, endpoint, methods, protected, summary, tags in routes:

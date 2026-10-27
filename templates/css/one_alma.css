@@ -178,3 +178,16 @@ ul.import-help { padding-left: 20px; }
     .sales-dialog .product-form-grid { grid-template-columns: 1fr; }
     .dialog-actions .primary { flex: 1 1 100%; }
 }
+
+/* Delivery import */
+#import-dialog.has-preview { width: min(1050px, calc(100% - 24px)); }
+.import-template { margin: 0 0 22px; font-size: .9rem; }
+.import-template a { color: #efb1c6; text-underline-offset: 3px; }
+.import-summary { margin: 20px 0 12px; font-size: .9rem; }
+.import-preview-scroll { overflow-x: auto; max-height: 45vh; }
+.import-preview-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.import-preview-table th, .import-preview-table td { padding: 10px 8px; border-bottom: 1px solid #59424a; text-align: left; }
+.import-preview-table th { background: #3b252e; position: sticky; top: 0; }
+.import-preview-table td:nth-child(3) { min-width: 150px; max-width: 270px; }
+.import-preview-table td:last-child { min-width: 150px; max-width: 280px; overflow-wrap: anywhere; }
+.import-preview-table .import-invalid { background: #632e3b; color: #ffdce3; }

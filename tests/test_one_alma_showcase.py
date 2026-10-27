@@ -136,7 +136,7 @@ def test_deleted_product_cannot_be_changed_by_an_old_tab(repository, product, me
 
 
 @pytest.mark.parametrize("use_import", [False, True])
-def test_quantity_reduction_keeps_showcase_within_new_remainder(repository, product, use_import):
+def test_edit_clamps_showcase_while_delivery_preserves_it(repository, product, use_import):
     repository.set_sold_count(product.id, 1)
     repository.set_showcase_quantity(product.id, 5)
     updated = NewProduct(
@@ -157,7 +157,9 @@ def test_quantity_reduction_keeps_showcase_within_new_remainder(repository, prod
         repository.update_product(product.id, updated)
 
     saved = repository.snapshot().products[-1]
-    assert (len(saved.units), saved.sold_count, saved.available, saved.showcase_quantity) == (3, 1, 2, 2)
+    assert (len(saved.units), saved.sold_count, saved.available, saved.showcase_quantity) == (
+        (10, 1, 9, 5) if use_import else (3, 1, 2, 2)
+    )
 
 
 def test_concurrent_sale_and_showcase_updates_cannot_exceed_remainder(repository, product):
@@ -192,8 +194,8 @@ def test_failed_import_rolls_back_showcase_clamping_as_well_as_stock(repository,
         quantity=2,
     )
 
-    with pytest.raises(ValueError, match="меньше"):
-        repository.import_products([changed, replace(changed, position=1, quantity=1)])
+    with pytest.raises(ValueError, match="1000"):
+        repository.import_products([changed, replace(changed, quantity=1000)])
 
     assert repository.snapshot() == before
 

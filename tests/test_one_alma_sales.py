@@ -163,19 +163,19 @@ def test_import_preserves_sale_snapshot_customer_date_price_and_showcase(reposit
     changed = repository.snapshot()
 
     assert changed.sales[-1] == sale
-    assert changed.products[-1].cells[5] == "500,00"
+    assert changed.products[-1].cells == product.cells
     assert changed.products[-1].showcase_quantity == 2
     assert [u.id for u in changed.products[-1].units[:4]] == [u.id for u in product.units]
     assert changed.sales_amount == "159,98"
-    assert changed.history[0].description == "Обновление из импорта"
+    assert changed.history[0].description == "Приход из Excel"
 
 
 def test_failed_import_rolls_back_inventory_and_history(repository, product, item):
     sell(repository, product, 3)
     before = repository.snapshot()
 
-    with pytest.raises(ValueError, match="меньше"):
-        repository.import_products([replace(item, position=27), replace(item, quantity=2)])
+    with pytest.raises(ValueError, match="1000"):
+        repository.import_products([replace(item, article="NEW"), replace(item, quantity=1000)])
 
     assert repository.snapshot() == before
 
@@ -322,19 +322,16 @@ def test_actual_excel_import_keeps_recorded_sale_and_ignores_history_and_showcas
     workbook.save(content)
     workbook.close()
 
-    response = client.post(
-        "/one_alma/import",
-        data={"csrf_token": csrf},
-        files={
-            "file": ("products.xlsx", content.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        },
-    )
+    upload = {"file": ("products.xlsx", content.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    preview = client.post("/one_alma/import", data={"csrf_token": csrf}, files=upload).json()["preview"]
+
+    response = client.post("/one_alma/import", data={"csrf_token": csrf, "fingerprint": preview["fingerprint"]}, files=upload)
     after = repository.snapshot()
 
     assert response.status_code == 201
     assert after.sales == before.sales
     assert after.products[-1].showcase_quantity == 2 and after.products[-1].sold_count == 1
-    assert len(after.products[-1].units) == 5 and after.products[-1].cells[5] == "500,00"
+    assert len(after.products[-1].units) == 9 and after.products[-1].cells == product.cells
     assert after.sales[-1].customer == "Макс" and after.sales[-1].price_cents == 7999
 
 

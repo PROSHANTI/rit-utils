@@ -157,21 +157,23 @@ def test_quantity_cannot_be_lower_than_sold_and_change_rolls_back(repository, ne
     assert repository.snapshot().total == 53
 
 
-def test_import_updates_by_position_adds_new_and_leaves_other_products_unchanged(repository, new_product):
-    initial = repository.snapshot()
-    first = initial.products[0]
-    changed = replace(new_product, position=1, article="0262", name="Обновлённый крем", quantity=2, wholesale_price="")
+def test_import_matches_article_volume_expiry_and_preserves_existing_fields(repository, new_product):
+    repository.add_product(new_product)
+    first = repository.snapshot().products[-1]
+    before = repository.set_showcase_quantity(first.id, 2)
+    incoming = replace(new_product, position=999, name="Новое имя", quantity=2, central_bank_price="500")
 
-    result = repository.import_products([changed, new_product])
+    result = repository.import_products([incoming, replace(new_product, article="NEW")])
 
-    inventory = InventoryRepository(repository.database).snapshot()
+    inventory = repository.snapshot()
+    updated = inventory.products[-2]
     assert result == ImportResult(added=1, updated=1)
-    assert (len(inventory.products), inventory.total) == (26, 53)
-    assert inventory.products[0].id == first.id
-    assert inventory.products[0].cells == changed.to_cells()
-    assert inventory.products[0].units == first.units
-    assert inventory.products[1:-1] == initial.products[1:]
-    assert inventory.products[-1].cells == new_product.to_cells()
+    assert (len(inventory.products), inventory.total) == (27, before.total + 5)
+    assert updated.cells == first.cells
+    assert updated.units[:3] == first.units
+    assert len(updated.units) == 5 and updated.showcase_quantity == 2
+    assert inventory.products[-1].cells[:2] == ("27", "NEW")
+    assert inventory.products[:-2] == before.products[:-1]
 
 
 def test_repeat_import_preserves_sales_unit_ids_and_sequences(repository, new_product):
@@ -183,14 +185,14 @@ def test_repeat_import_preserves_sales_unit_ids_and_sequences(repository, new_pr
 
     result = repository.import_products([new_product])
 
-    assert result == ImportResult(added=0, updated=1)
+    assert result == ImportResult(added=0, updated=0, already_imported=True)
     assert repository.snapshot() == before
     with sqlite3.connect(repository.database) as connection:
         assert list(connection.iterdump()) == stored_before
 
 
 @pytest.mark.parametrize("quantity", [1, 5])
-def test_import_resizes_total_quantity_without_losing_sold_units(repository, new_product, quantity):
+def test_import_adds_to_total_and_keeps_sold_units(repository, new_product, quantity):
     repository.add_product(new_product)
     original = repository.snapshot().products[-1]
     sold_unit = original.units[-1]
@@ -203,39 +205,49 @@ def test_import_resizes_total_quantity_without_losing_sold_units(repository, new
     updated = inventory.products[-1]
     assert result == ImportResult(added=0, updated=1)
     assert updated.id == original.id
-    assert (len(updated.units), updated.sold_count, updated.available) == (quantity, 1, quantity - 1)
-    assert [unit.number for unit in updated.units] == list(range(1, quantity + 1))
+    assert (len(updated.units), updated.sold_count, updated.available) == (3 + quantity, 1, 2 + quantity)
+    assert [unit.number for unit in updated.units] == list(range(1, 4 + quantity))
     assert next(unit for unit in updated.units if unit.sold).id == sold_unit.id
-    assert inventory.valuations[0].sold == Decimal("110.25")
-    if quantity > len(original.units):
-        assert updated.units[: len(original.units)] == original.units[:-1] + (replace(sold_unit, sold=True),)
-        assert all(unit.id > sold_unit.id and not unit.sold for unit in updated.units[len(original.units) :])
+    assert inventory.valuations[0].sold == Decimal("100.25")
+    assert all(unit.id > sold_unit.id and not unit.sold for unit in updated.units[3:])
 
 
-@pytest.mark.parametrize("position", [1, 26])
-def test_duplicate_position_in_import_file_rolls_back_entire_batch(repository, new_product, position):
+@pytest.mark.parametrize("changes", [{"expiry": "10.2028"}, {"volume": "100 мл"}, {"article": "007"}])
+def test_different_batch_gets_separate_automatic_position(repository, new_product, changes):
+    repository.add_product(new_product)
     before = repository.snapshot()
-    repeated = replace(new_product, position=position)
 
-    with pytest.raises(ValueError, match=f"повторяется № {position}"):
-        repository.import_products([repeated, replace(repeated, name="Повтор")])
+    result = repository.import_products([replace(new_product, position=1, **changes)])
 
-    assert repository.snapshot() == before
+    after = repository.snapshot()
+    assert result == ImportResult(added=1, updated=0)
+    assert after.products[:-1] == before.products
+    assert after.products[-1].cells[0] == "27"
+    assert after.total == before.total + 3
 
 
-def test_import_quantity_below_sales_rolls_back_additions_updates_and_sequences(repository, new_product):
-    first = repository.snapshot().products[0]
-    for unit in first.units:
-        repository.set_sold(unit.id, True)
+def test_repeated_composite_key_inside_file_is_combined_without_using_position(repository, new_product):
+    before = repository.snapshot()
+
+    result = repository.import_products([new_product, replace(new_product, position=1, quantity=2)])
+
+    after = repository.snapshot()
+    assert result == ImportResult(added=1, updated=0)
+    assert len(after.products) == len(before.products) + 1
+    assert len(after.products[-1].units) == 5
+
+
+def test_overflow_rolls_back_additions_history_receipt_and_sequences(repository, new_product):
+    repository.add_product(new_product)
     before = repository.snapshot()
     with sqlite3.connect(repository.database) as connection:
         stored_before = list(connection.iterdump())
-    products = [new_product, replace(new_product, position=2, quantity=4), replace(new_product, position=1, quantity=1)]
+    products = [replace(new_product, article="NEW"), replace(new_product, quantity=1000)]
 
-    with pytest.raises(ValueError, match="№ 1: количество не может быть меньше"):
+    with pytest.raises(ValueError, match="больше 1000"):
         repository.import_products(products)
 
-    assert InventoryRepository(repository.database).snapshot() == before
+    assert repository.snapshot() == before
     with sqlite3.connect(repository.database) as connection:
         assert list(connection.iterdump()) == stored_before
 
@@ -249,15 +261,59 @@ def test_import_validates_all_fields_before_changing_database(repository, new_pr
     assert not repository.database.exists()
 
 
-def test_concurrent_imports_of_same_position_do_not_create_duplicates(repository, new_product):
+def test_concurrent_imports_of_same_delivery_do_not_add_twice(repository, new_product):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: InventoryRepository(repository.database).import_products([new_product]), range(4)))
 
     inventory = repository.snapshot()
     assert sum(result.added for result in results) == 1
-    assert sum(result.updated for result in results) == 3
+    assert sum(result.already_imported for result in results) == 3
     assert (len(inventory.products), inventory.total) == (26, 53)
-    assert len([product for product in inventory.products if product.cells[0] == "26"]) == 1
+
+
+def test_distinct_identical_deliveries_are_both_added(repository, new_product):
+    repository.import_products([new_product], "delivery-one")
+
+    result = repository.import_products([new_product], "delivery-two")
+
+    assert result == ImportResult(added=0, updated=1)
+    assert len(repository.snapshot().products[-1].units) == 6
+
+
+def test_changed_previously_imported_delivery_is_rejected(repository, new_product):
+    repository.import_products([new_product], "delivery-one")
+    before = repository.snapshot()
+
+    with pytest.raises(ValueError, match="другими данными"):
+        repository.import_products([replace(new_product, quantity=2)], "delivery-one")
+
+    assert repository.snapshot() == before
+
+
+def test_concurrent_distinct_deliveries_do_not_lose_quantities(repository, new_product):
+    repository.snapshot()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(
+                lambda n: InventoryRepository(repository.database).import_products([new_product], f"delivery-{n}"), range(4)
+            )
+        )
+
+    assert sum(result.added for result in results) == 1
+    assert sum(result.updated for result in results) == 3
+    assert len(repository.snapshot().products[-1].units) == 12
+
+
+def test_manual_creation_assigns_position_inside_transaction(repository, new_product):
+    repository.snapshot()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(
+            pool.map(lambda _: InventoryRepository(repository.database).add_product(replace(new_product, position=1)), range(4))
+        )
+
+    assert [product.cells[0] for product in repository.snapshot().products[-4:]] == ["26", "27", "28", "29"]
 
 
 def test_bulk_delete_is_atomic_when_any_product_is_missing(repository):

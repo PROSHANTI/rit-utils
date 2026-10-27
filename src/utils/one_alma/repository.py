@@ -4,12 +4,24 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
-from .models import HistoryEntry, ImportResult, Inventory, NewProduct, Product, ProductUnit, Sale, format_cents
+from .models import (
+    HistoryEntry,
+    ImportResult,
+    Inventory,
+    NewProduct,
+    Product,
+    ProductUnit,
+    Sale,
+    format_cents,
+    product_key,
+    shipment_fingerprint,
+)
 
 logger = logging.getLogger(__name__)
 CELL_KEYS = ("position", "article", "name", "volume", "expiry", "central_bank_price", "wholesale_price", "market_price")
@@ -215,38 +227,108 @@ class InventoryRepository:
         )
 
     def add_product(self, product: NewProduct) -> None:
-        cells = product.to_cells()
+        replace(product, position=1).to_cells()
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
+            cells = replace(product, position=self._next_position(connection)).to_cells()
             product_id = self._insert_product(connection, cells, product.quantity)
             self._event(connection, product_id, "edit", {"description": "Добавлен товар", "quantity": f"0 → {product.quantity}"})
         logger.info("Добавлена позиция OneAlma: %s", " ".join(product.name.split()))
 
-    def import_products(self, products: list[NewProduct]) -> ImportResult:
-        prepared = [(product.to_cells(), product.quantity) for product in products]
-        positions: set[str] = set()
-        for cells, _ in prepared:
-            if cells[0] in positions:
-                raise ValueError(f"В файле повторяется № {cells[0]}. Оставьте одну строку для каждой позиции. Импорт отменён.")
-            positions.add(cells[0])
+    @staticmethod
+    def _next_position(connection: sqlite3.Connection) -> int:
+        return connection.execute("SELECT COALESCE(MAX(CAST(position AS INTEGER)),0)+1 FROM products").fetchone()[0]
+
+    @staticmethod
+    def _check_receipt(connection: sqlite3.Connection, receipt_id: str, fingerprint: str) -> bool:
+        previous = connection.execute("SELECT fingerprint FROM one_alma_imports WHERE receipt_id=?", (receipt_id,)).fetchone()
+        if previous and previous["fingerprint"] != fingerprint:
+            raise ValueError("Эта поставка уже загружена с другими данными. Для новой поставки скачайте новый шаблон.")
+        return previous is not None
+
+    @staticmethod
+    def _import_plan(connection: sqlite3.Connection, products: list[NewProduct]) -> list[dict]:
+        existing: dict[tuple[str, str, str], sqlite3.Row] = {}
+        for row in connection.execute(
+            """SELECT p.*,COUNT(u.id) AS quantity FROM products p LEFT JOIN product_units u ON u.product_id=p.id
+               GROUP BY p.id ORDER BY CAST(p.position AS INTEGER),p.id"""
+        ):
+            existing.setdefault(product_key(tuple(row[key] for key in CELL_KEYS)), row)
+        grouped: dict[tuple[str, str, str], dict] = {}
+        next_position = InventoryRepository._next_position(connection)
+        for product in products:
+            cells = product.to_cells()
+            key = product_key(cells)
+            if key not in grouped:
+                found = existing.get(key)
+                position = int(found["position"]) if found else next_position
+                if not found:
+                    next_position += 1
+                grouped[key] = {
+                    "cells": replace(product, position=position).to_cells(),
+                    "product_id": found["id"] if found else None,
+                    "position": position,
+                    "before": found["quantity"] if found else 0,
+                    "incoming": 0,
+                    "action": "Пополнение" if found else "Новый товар",
+                    "error": "",
+                }
+            item = grouped[key]
+            item["incoming"] += product.quantity
+            item["after"] = item["before"] + item["incoming"]
+            if item["after"] > 1000:
+                item["error"] = "После пополнения получится больше 1000 шт. в одной позиции."
+        return list(grouped.values())
+
+    def preview_import(self, products: list[NewProduct], receipt_id: str) -> dict:
+        fingerprint = shipment_fingerprint(products)
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            already = self._check_receipt(connection, receipt_id, fingerprint)
+            plan = self._import_plan(connection, products)
+        return {
+            "rows": plan,
+            "added": sum(item["product_id"] is None for item in plan) if not already else 0,
+            "updated": sum(item["product_id"] is not None for item in plan) if not already else 0,
+            "quantity": sum(product.quantity for product in products) if not already else 0,
+            "already_imported": already,
+        }
+
+    def import_products(self, products: list[NewProduct], receipt_id: str | None = None) -> ImportResult:
+        if not products:
+            raise ValueError("В файле нет товаров.")
+        fingerprint = shipment_fingerprint(products)
+        receipt_id = receipt_id or "content:" + fingerprint
         added = updated = 0
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            for cells, quantity in prepared:
-                existing = connection.execute("SELECT id FROM products WHERE position=?", (cells[0],)).fetchone()
-                if existing is None:
-                    product_id = self._insert_product(connection, cells, quantity)
-                    self._event(
-                        connection,
-                        product_id,
-                        "import",
-                        {"description": "Добавление из импорта", "quantity": f"0 → {quantity}", "price": cells[5]},
-                    )
+            if self._check_receipt(connection, receipt_id, fingerprint):
+                return ImportResult(added=0, updated=0, already_imported=True)
+            plan = self._import_plan(connection, products)
+            for item in plan:
+                if item["error"]:
+                    raise ValueError(f"Артикул {item['cells'][1]}: {item['error']} Импорт отменён.")
+                product_id = item["product_id"]
+                if product_id is None:
+                    product_id = self._insert_product(connection, item["cells"], item["incoming"])
                     added += 1
                 else:
-                    self._update_product(connection, existing["id"], cells, quantity, event_kind="import")
+                    last_number = connection.execute(
+                        "SELECT COALESCE(MAX(number),0) FROM product_units WHERE product_id=?", (product_id,)
+                    ).fetchone()[0]
+                    self._insert_units(connection, product_id, last_number + 1, last_number + item["incoming"])
                     updated += 1
-        logger.info("Импорт товаров OneAlma завершён: добавлено %s, обновлено %s", added, updated)
+                self._event(
+                    connection,
+                    product_id,
+                    "import",
+                    {"description": "Приход из Excel", "quantity": f"{item['before']} → {item['after']}"},
+                )
+            connection.execute(
+                "INSERT INTO one_alma_imports(receipt_id,fingerprint,created_at) VALUES (?,?,?)",
+                (receipt_id, fingerprint, datetime.now(UTC).isoformat()),
+            )
+        logger.info("Приход OneAlma сохранён: новых позиций %s, пополнено %s", added, updated)
         return ImportResult(added=added, updated=updated)
 
     def update_product(self, product_id: int, product: NewProduct) -> None:
@@ -314,6 +396,11 @@ class InventoryRepository:
                 UNIQUE (product_id, number)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS products_position ON products(position);
+            CREATE TABLE IF NOT EXISTS one_alma_imports (
+                receipt_id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS one_alma_sales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_id INTEGER NOT NULL,
