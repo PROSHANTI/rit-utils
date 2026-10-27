@@ -1,0 +1,14 @@
+<dialog id="import-dialog" class="inventory-dialog import-dialog" aria-labelledby="import-title">
+    <form id="import-form">
+        <div class="dialog-heading">
+            <h2 id="import-title">Импорт товаров</h2>
+            <button type="button" class="close-dialog" data-close aria-label="Закрыть">×</button>
+        </div>
+        <p class="import-template"><a href="{{ import_template_url }}">Скачать шаблон Excel</a></p>
+        <label for="import-file">Файл .xlsx, до 5 МБ</label>
+        <input id="import-file" name="file" type="file" accept=".xlsx" required>
+        <div id="import-preview" hidden aria-live="polite"></div>
+        <p class="dialog-status form-error import-error" role="alert"></p>
+        <button type="submit" id="import-submit" class="action-button dialog-save import-submit">Проверить файл</button>
+    </form>
+</dialog>

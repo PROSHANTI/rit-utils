@@ -1,5 +1,4 @@
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
@@ -9,6 +8,7 @@ from zipfile import BadZipFile, ZipFile
 from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
+from ..excel_validation import validate_xlsx_upload, validation_message
 from .models import NewProduct, ShipmentItem, shipment_fingerprint
 
 IMPORT_HEADERS = ("Артикул", "Наименование", "Объём", "Годен до", "Цена ЦБ", "Цена опт", "Цена магазина", "Количество")
@@ -61,15 +61,12 @@ class ExcelProductImporter:
             raise ValueError("\n".join(errors) + " Импорт отменён.")
 
     def inspect(self, content: bytes, filename: str) -> Shipment:
-        if not filename.lower().endswith(".xlsx"):
-            raise ValueError("Загрузите файл .xlsx.")
-        if len(content) > self.max_file_size:
-            raise ValueError("Размер файла не должен превышать 5 МБ.")
+        validate_xlsx_upload(content, filename, self.max_file_size)
         self._validate_archive(content)
         try:
             workbook = load_workbook(BytesIO(content), read_only=True, data_only=False, keep_links=False)
         except Exception:
-            raise ValueError("Не удалось прочитать Excel. Проверьте формат .xlsx.") from None
+            raise ValueError("Не удалось прочитать Excel. Проверьте файл .xlsx.") from None
         try:
             sheet = workbook.worksheets[0]
             if (sheet.max_row or 0) > self.max_rows + 20 or (sheet.max_column or 0) > 30:
@@ -93,8 +90,12 @@ class ExcelProductImporter:
                 view: dict[str, object] = {field: self._text(value)[:300] for field, value in values.items()}
                 view.update(row=row_number, error="")
                 try:
-                    if any(isinstance(value, str) and value.startswith("=") for value in values.values()):
-                        raise ValueError("Формулы не поддерживаются: вставьте их значения.")
+                    labels = dict(zip(ShipmentItem.model_fields, IMPORT_HEADERS))
+                    formula_fields = [
+                        field for field, value in values.items() if isinstance(value, str) and value.startswith("=")
+                    ]
+                    if formula_fields:
+                        raise ValueError("; ".join(f"{labels[field]}: замените формулу значением" for field in formula_fields))
                     item = ShipmentItem(
                         **{field: self._text(value) for field, value in values.items() if field not in ("quantity", "expiry")},
                         expiry=self._expiry(values["expiry"]),
@@ -103,11 +104,7 @@ class ExcelProductImporter:
                     products.append(item.to_product())
                     view.update(item.model_dump())
                 except ValidationError as exc:
-                    labels = dict(zip(ShipmentItem.model_fields, IMPORT_HEADERS))
-                    view["error"] = "; ".join(
-                        f"{labels.get(str(error['loc'][0]), str(error['loc'][0]))}: {self._validation_message(error)}"
-                        for error in exc.errors()
-                    )
+                    view["error"] = validation_message(exc, dict(zip(ShipmentItem.model_fields, IMPORT_HEADERS)))
                 except (ValueError, TypeError) as exc:
                     view["error"] = str(exc)
                 rows.append(view)
@@ -130,16 +127,6 @@ class ExcelProductImporter:
             return Shipment(products, rows, fingerprint, receipt_id)
         finally:
             workbook.close()
-
-    @staticmethod
-    def _validation_message(error: Mapping) -> str:
-        if error["type"] in ("greater_than_equal", "less_than_equal", "int_type"):
-            return "укажите целое число от 1 до 1000"
-        if error["type"] == "string_too_short":
-            return "заполните поле"
-        if error["type"] == "string_too_long":
-            return "слишком длинное значение"
-        return str(error.get("msg", "Проверьте значение.")).removeprefix("Value error, ")
 
     @staticmethod
     def _validate_archive(content: bytes) -> None:
@@ -183,7 +170,7 @@ class ExcelProductImporter:
     def _integer(value: object) -> int:
         text = str(value)
         if not re.fullmatch(r"\d+(?:\.0+)?", text):
-            raise ValueError("Количество должно быть целым положительным числом.")
+            raise ValueError("Количество: укажите целое положительное число")
         return int(text.split(".", 1)[0])
 
     @staticmethod

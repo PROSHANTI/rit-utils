@@ -76,7 +76,8 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert "Выставлено ·" not in html and "Не выставлено" not in html
     assert "Каждый чекбокс —" not in html and "Изменения сохраняются автоматически." not in html
     assert html.index("Расчёт") < html.index("Скачать PDF") < html.index('class="inventory-table"')
-    assert "Импорт товаров" in html and "Удалить выбранные" in html
+    assert "Импорт товаров" in html and "Удалить выбранные" not in html
+    assert "select-all" not in html and "select-product" not in html and "selection-count" not in html
     assert "Без цены: 4 шт." in html
     assert len(re.findall("data-sort-column=", html)) == 10
     assert 'data-sort-column="5">Цена ЦБ, ₽ <span' in html

@@ -3,9 +3,6 @@
     const status = document.getElementById('save-status');
     const download = container.querySelector('.download-pdf');
     const tableBody = container.querySelector('.inventory-table tbody');
-    const selections = [...container.querySelectorAll('.select-product')];
-    const selectAll = document.getElementById('select-all');
-    const deleteSelected = document.getElementById('delete-selected');
     const productDialog = document.getElementById('product-dialog');
     const productForm = document.getElementById('product-form');
     const importDialog = document.getElementById('import-dialog');
@@ -73,20 +70,11 @@
         return error instanceof TypeError ? 'Нет связи с сервером. Повторите действие.' : error.message;
     }
 
-    function updateSelection() {
-        const selected = selections.filter(input => input.checked).length;
-        document.getElementById('selection-count').textContent = `Выбрано: ${selected}`;
-        deleteSelected.disabled = selected === 0;
-        selectAll.checked = selected > 0 && selected === selections.length;
-        selectAll.indeterminate = selected > 0 && selected < selections.length;
-    }
-
     function setBusy(value) {
         busy = value;
         container.querySelectorAll('button, input').forEach(control => { control.disabled = busy; });
         download.setAttribute('aria-disabled', String(busy));
         if (!busy) {
-            updateSelection();
             tableBody.querySelectorAll('[data-count-kind="showcase"]').forEach(button => {
                 const row = button.closest('tr');
                 button.disabled = Number(row.dataset.quantity) === Number(row.dataset.sold);
@@ -256,12 +244,6 @@
         }
     });
 
-    selectAll.addEventListener('change', () => {
-        selections.forEach(input => { input.checked = selectAll.checked; });
-        updateSelection();
-    });
-    selections.forEach(input => { input.addEventListener('change', updateSelection); });
-
     function openProduct(row = null) {
         productForm.reset();
         productForm.querySelector('.dialog-status').textContent = '';
@@ -314,49 +296,19 @@
     function resetImport() {
         importFingerprint = '';
         importValid = false;
-        importPreview.hidden = true;
-        importPreview.replaceChildren();
-        importDialog.classList.remove('has-preview');
-        importForm.querySelector('.dialog-status').textContent = '';
-        importSubmit.textContent = 'Проверить файл';
-        importSubmit.disabled = false;
+        window.ExcelImportDialog.reset(importDialog);
     }
     importForm.elements.file.addEventListener('change', resetImport);
 
     function renderImportPreview(preview) {
-        importPreview.replaceChildren();
-        const summary = document.createElement('p');
-        summary.className = 'import-summary';
-        summary.textContent = preview.already_imported ? 'Эта поставка уже загружена. Остатки не изменятся.' :
+        const summary = preview.already_imported ? 'Эта поставка уже загружена. Остатки не изменятся.' :
             `Новых позиций: ${preview.added}. Пополнятся: ${preview.updated}. Приход: ${preview.quantity} шт.`;
-        importPreview.appendChild(summary);
-        const wrapper = document.createElement('div');
-        wrapper.className = 'import-preview-scroll';
-        const table = document.createElement('table');
-        table.className = 'import-preview-table';
-        const head = table.createTHead().insertRow();
-        ['Строка', 'Артикул', 'Наименование', 'Объём', 'Годен до', 'Приход', 'Было → станет', 'Результат'].forEach(label => {
-            const cell = document.createElement('th');
-            cell.textContent = label;
-            head.appendChild(cell);
-        });
-        const body = table.createTBody();
-        preview.rows.forEach(item => {
-            const row = body.insertRow();
-            row.classList.toggle('import-invalid', Boolean(item.error));
-            const result = item.error || (preview.already_imported ? 'Уже загружено' : item.action);
-            const values = [item.row, item.article, item.name, item.volume, item.expiry, item.quantity,
-                item.error || preview.already_imported ? '—' : `${item.before} → ${item.after}`, result];
-            values.forEach(value => { const cell = row.insertCell(); cell.textContent = value ?? '—'; });
-        });
-        wrapper.appendChild(table);
-        importPreview.appendChild(wrapper);
-        importPreview.hidden = false;
-        importDialog.classList.add('has-preview');
-        importValid = preview.valid && !preview.already_imported;
+        const rows = preview.rows.map(item => ({...item,
+            details: [item.volume && `Объём: ${item.volume}`, item.expiry && `Годен до: ${item.expiry}`],
+            result: preview.already_imported ? 'Уже загружено' : item.action,
+        }));
+        importValid = window.ExcelImportDialog.render(importDialog, {rows, summary, valid: preview.valid, alreadyImported: preview.already_imported});
         importFingerprint = importValid ? preview.fingerprint : '';
-        importSubmit.textContent = 'Импортировать';
-        importForm.querySelector('.dialog-status').textContent = preview.valid ? '' : 'Исправьте подсвеченные строки в Excel и выберите файл заново.';
     }
 
     importForm.addEventListener('submit', async event => {
@@ -381,7 +333,7 @@
     });
 
     async function deleteProducts(ids) {
-        if (!window.confirm(`Удалить выбранные позиции (${ids.length})? История оформленных продаж сохранится.`)) return;
+        if (!window.confirm('Удалить товар? История оформленных продаж сохранится.')) return;
         const body = new URLSearchParams({csrf_token: csrfToken});
         ids.forEach(id => { body.append('product_ids', id); });
         setBusy(true);
@@ -397,7 +349,6 @@
         }
     }
 
-    deleteSelected.addEventListener('click', () => { deleteProducts(selections.filter(input => input.checked).map(input => input.value)); });
     container.querySelectorAll('.delete-product').forEach(button => {
         button.addEventListener('click', () => { deleteProducts([button.closest('tr').dataset.productId]); });
     });
@@ -558,7 +509,6 @@
     setInterval(() => {
         if (saleDialog.open) document.getElementById('sale-date').value = moscowTime(new Date());
     }, 1000);
-    updateSelection();
     sortRows();
     setInterval(() => { refreshSession().catch(() => {}); }, 10 * 60 * 1000);
 })();
