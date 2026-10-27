@@ -8,6 +8,7 @@ class InventoryPage {
         this.editing = null;
         this.pendingConfirmation = null;
         this.importData = null;
+        this.importBusy = false;
         this.sortField = "id";
         this.descending = false;
         this.refreshVersion = 0;
@@ -41,8 +42,11 @@ class InventoryPage {
         document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
         document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("click", event => {
             const rect = dialog.getBoundingClientRect();
-            if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
+            if (dialog.dataset.busy !== 'true' && event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
         }));
+        document.getElementById('import-dialog').addEventListener('cancel', event => {
+            if (this.importBusy) event.preventDefault();
+        });
         document.getElementById("add-product").addEventListener("click", () => this.productEditor());
         document.getElementById("product-form").addEventListener("submit", event => this.saveProduct(event));
         document.getElementById("import-form").addEventListener("submit", event => this.importExcel(event));
@@ -69,6 +73,10 @@ class InventoryPage {
     }
 
     open(id) {
+        if (id === 'import-dialog') {
+            document.getElementById('import-form').reset();
+            this.resetImport();
+        }
         this.error(id, "");
         document.getElementById(id).showModal();
     }
@@ -213,66 +221,70 @@ class InventoryPage {
 
     resetImport() {
         this.importData = null;
-        document.getElementById("import-preview").hidden = true;
-        document.getElementById("import-dialog").classList.remove("has-preview");
-        document.querySelector('#import-form button[type="submit"]').textContent = "Предварительный просмотр";
+        window.ExcelImportDialog.reset(document.getElementById('import-dialog'));
     }
 
     async importExcel(event) {
         event.preventDefault();
+        if (this.importBusy) return;
         if (this.importData) {
             const data = this.importData;
-            return this.submit(event, "import-dialog", async () => {
-                try {
-                    const result = await this.request("/inventory/import", "POST", data);
-                    this.resetImport();
-                    return result;
-                } catch (error) {
-                    this.resetImport();
-                    throw error;
-                }
-            });
+            this.importBusy = true;
+            window.ExcelImportDialog.setBusy(document.getElementById('import-dialog'), true);
+            try {
+                return await this.submit(event, 'import-dialog', async () => {
+                    try {
+                        const result = await this.request('/inventory/import', 'POST', data);
+                        this.resetImport();
+                        return result;
+                    } catch (error) {
+                        this.resetImport();
+                        throw error;
+                    }
+                });
+            } finally {
+                this.importBusy = false;
+                window.ExcelImportDialog.setBusy(document.getElementById('import-dialog'), false);
+            }
         }
-        const button = event.currentTarget.querySelector('button[type="submit"]');
+        const button = document.getElementById('import-submit');
         const data = new FormData(event.currentTarget);
-        button.disabled = true;
-        this.error("import-dialog", "");
+        this.importBusy = true;
+        window.ExcelImportDialog.setBusy(document.getElementById('import-dialog'), true);
+        this.error('import-dialog', '');
+        let canImport = false;
         try {
-            const result = await this.request("/inventory/import", "POST", data);
-            this.renderImportPreview(result.preview);
-            data.set("fingerprint", result.preview.fingerprint);
-            this.importData = data;
-            button.textContent = "Применить импорт";
-        } catch (error) { this.error("import-dialog", error.message); }
-        finally { button.disabled = false; }
+            const result = await this.request('/inventory/import', 'POST', data);
+            canImport = this.renderImportPreview(result.preview);
+            if (canImport) {
+                data.set('fingerprint', result.preview.fingerprint);
+                this.importData = data;
+            }
+        } catch (error) { this.error('import-dialog', error.message); }
+        finally {
+            this.importBusy = false;
+            window.ExcelImportDialog.setBusy(document.getElementById('import-dialog'), false);
+            button.disabled = !document.getElementById('import-preview').hidden && !canImport;
+        }
     }
 
     renderImportPreview(preview) {
-        const panel = document.getElementById("import-preview");
-        panel.replaceChildren(this.element("p", `Будет добавлено: ${preview.added}. Будет обновлено: ${preview.updated}.`, "preview-summary"));
-        const scroll = this.element("div", undefined, "table-scroll");
-        const table = this.element("table", undefined, "import-preview-table");
-        const header = this.element("thead");
-        const headerRow = this.element("tr");
-        ["Действие", "Артикул", "Название", "Количество", "Изменения"].forEach(text => headerRow.append(this.element("th", text)));
-        header.append(headerRow);
-        const body = this.element("tbody");
-        preview.rows.forEach(item => {
-            const row = this.element("tr");
-            const changes = this.fields.filter(field => field !== "quantity" && item.before && item.before[field] !== item.after[field]).map(field => {
+        const rows = preview.rows.map(item => {
+            const changes = this.fields.filter(field => field !== 'quantity' && item.before && item.before[field] !== item.after[field]).map(field => {
                 const title = this.columns[this.fields.indexOf(field) + 1];
-                return `${title}: ${item.before[field] || "—"} → ${item.after[field] || "—"}`;
+                return `${title}: ${item.before[field] || '—'} → ${item.after[field] || '—'}`;
             });
-            [item.action === "add" ? "Новый товар" : "Обновление", item.after.article || "—", item.after.name,
-                `${item.before ? item.before.quantity + " → " : ""}${item.after.quantity}`, changes.join("\n") || "—"
-            ].forEach(value => row.append(this.element("td", value)));
-            body.append(row);
+            return {
+                row: item.row, error: item.error, article: item.after.article, name: item.after.name,
+                details: [item.after.brand && `Бренд: ${item.after.brand}`, item.after.expiry && `Годен до: ${item.after.expiry}`],
+                quantity: item.after.quantity, before: item.before?.quantity ?? 0, after: item.after.quantity,
+                result: [item.action === 'add' ? 'Новый товар' : 'Обновление', ...changes].join('\n'),
+            };
         });
-        table.append(header, body);
-        scroll.append(table);
-        panel.append(scroll);
-        panel.hidden = false;
-        document.getElementById("import-dialog").classList.add("has-preview");
+        return window.ExcelImportDialog.render(document.getElementById('import-dialog'), {
+            rows, valid: preview.valid,
+            summary: `Новых позиций: ${preview.added}. Обновятся: ${preview.updated}.`,
+        });
     }
 
     confirm(title, action) {

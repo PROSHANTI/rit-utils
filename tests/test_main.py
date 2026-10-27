@@ -68,6 +68,7 @@ class TestApplicationRoutes:
             ("/one_alma/products/{product_id}", "PUT"),
             ("/one_alma/products", "DELETE"),
             ("/one_alma/import", "POST"),
+            ("/one_alma/import/template", "GET"),
             ("/inventory", "GET"),
             ("/inventory/items", "GET"),
             ("/inventory/products", "POST"),
@@ -78,11 +79,12 @@ class TestApplicationRoutes:
             ("/inventory/history", "GET"),
             ("/inventory/history/{snapshot_id}", "DELETE"),
             ("/inventory/import", "POST"),
+            ("/inventory/import/template", "GET"),
             ("/inventory/pdf", "GET"),
         }
 
-        assert len(router_routes) == 36
-        assert len(application_routes) == 36
+        assert len(router_routes) == 38
+        assert len(application_routes) == 38
         assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
         assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 

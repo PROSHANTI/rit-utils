@@ -6,9 +6,11 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=sales-1">
-    <script src="/static/one_alma_expiry.js?v=sales-1" defer></script>
-    <script src="/static/one_alma.js?v=sales-1" defer></script>
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=table-headers-2">
+    <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
+    <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
+    <script src="/static/one_alma_expiry.js?v=import-ui-1" defer></script>
+    <script src="/static/one_alma.js?v=import-ui-1" defer></script>
 </head>
 <body class="inventory-page">
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
@@ -51,16 +53,13 @@
         <section class="inventory-panel" aria-label="Товары">
             <div class="table-toolbar">
                 <span class="showcase-summary">На витрине: <span id="showcase-count">{{ inventory.showcase_quantity }}</span> шт. · позиций: <span id="showcase-products">{{ inventory.showcased_products }}</span></span>
-                <span id="selection-count">Выбрано: 0</span>
-                <button type="button" id="delete-selected" class="secondary-button" disabled>Удалить выбранные</button>
             </div>
             <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
             <p class="expiry-legend"><span>Красный — срок истёк</span><span>Жёлтый — осталось до двух месяцев</span></p>
             <div class="inventory-scroll" tabindex="0" aria-label="Таблица товаров, прокручивается горизонтально">
-                <table class="inventory-table"><colgroup><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
+                <table class="inventory-table"><colgroup><col><col><col><col><col><col><col><col><col><col><col></colgroup>
                     <caption class="visually-hidden">Товары OneAlma: цены указаны за одну штуку</caption>
                     <thead><tr>
-                        <th scope="col" class="selection-cell"><input type="checkbox" id="select-all" aria-label="Выбрать все товары"></th>
                         {% for column in columns %}<th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="{{ loop.index0 }}">{{ column }} <span aria-hidden="true">↕</span></button></th>{% endfor %}
                         <th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="9">Витрина <span aria-hidden="true">↕</span></button></th>
                         <th scope="col" aria-sort="none"><button type="button" class="sort-button" data-sort-column="8">Продано <span aria-hidden="true">↕</span></button></th>
@@ -69,7 +68,6 @@
                     <tbody>
                         {% for product in inventory.products %}
                         <tr data-product-id="{{ product.id }}" data-cells="{{ product.cells | tojson | forceescape }}" data-quantity="{{ product.units | length }}" data-sold="{{ product.sold_count }}" data-showcase="{{ product.showcase_quantity }}" data-unit-ids="{{ product.units | map(attribute='id') | list | tojson | forceescape }}" class="expiry-{{ expiry_info[product.id].status }}{% if product.available == 0 %} sold-out{% endif %}">
-                            <td class="selection-cell"><input type="checkbox" class="select-product" value="{{ product.id }}" aria-label="Выбрать {{ product.cells[2] }}"></td>
                             {% for cell in product.cells %}<td{% if loop.index0 == 4 %} class="expiry-cell" title="Годен до {{ expiry_info[product.id].expires_on.strftime('%d.%m.%Y') }} включительно. {% if expiry_info[product.id].days_remaining < 0 %}Срок истёк.{% else %}Осталось: {{ expiry_info[product.id].days_remaining }} дн.{% endif %}"{% endif %}>{{ cell }}</td>{% endfor %}
                             <td class="showcase-cell">
                                 <button type="button" class="count-badge showcase-badge {% if product.showcase_quantity == 0 %}empty{% endif %}" data-count-kind="showcase" aria-label="Настроить витрину: {{ product.cells[1] }}" {% if product.available == 0 %}disabled{% endif %}>{% if product.showcase_quantity %}✓ {{ product.showcase_quantity }} шт.{% else %}+{% endif %}</button>
@@ -103,7 +101,7 @@
             <form id="product-form">
                 <div class="dialog-heading"><h2 id="product-dialog-title">Добавить товар</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
                 <div class="product-form-grid">
-                    <div><label for="product-position">№</label><input id="product-position" name="position" type="number" min="1" max="999999" value="{{ inventory.next_position }}" placeholder="26" required></div>
+                    <div><label for="product-position">№</label><input id="product-position" name="position" readonly type="number" min="1" max="999999" value="{{ inventory.next_position }}" placeholder="26" required></div>
                     <div><label for="product-article">Артикул</label><input id="product-article" name="article" maxlength="64" placeholder="8986" required></div>
                     <div class="wide-field"><label for="product-name">Наименование препарата</label><input id="product-name" name="name" maxlength="300" placeholder="Крем для увлажнения кожи" required></div>
                     <div><label for="product-volume">Объём</label><input id="product-volume" name="volume" maxlength="64" placeholder="150 мл" required></div>
@@ -117,26 +115,7 @@
                 <button type="submit">Сохранить товар</button>
             </form>
         </dialog>
-        <dialog id="import-dialog" class="inventory-dialog">
-            <form id="import-form">
-                <div class="dialog-heading"><h2>Импорт товаров</h2><button type="button" class="close-dialog" aria-label="Закрыть">×</button></div>
-                <p class="import-help">Файл <strong>.xlsx</strong>, первый лист. Заголовки:</p>
-                <p class="import-columns">№ · Артикул · Наименование · Объём · Годен до · Цена ЦБ · Цена опт · Цена магазина · Количество</p>
-                <ul class="import-help">
-                    <li>Каждая следующая строка — один товар. Позиция с тем же № обновится, с новым № — добавится. В файле номера не должны повторяться.</li>
-                    <li>Годен до: <strong>09.2028</strong>. Цены: <strong>1343,43</strong> или <strong>1343.43</strong>, без ₽.</li>
-                    <li>Пустая цена означает, что цена неизвестна; при обновлении она очистит прежнюю цену. Артикулы с начальным нулём храните как текст.</li>
-                    <li>Количество — общее число штук, включая проданные. Оно заменит текущее количество; отметки продаж сохранятся. Указать меньше уже проданного нельзя. Без этой колонки количество будет 2.</li>
-                    <li>История продаж, покупатели, дата и цена продажи из Excel не загружаются и не перезаписываются.</li>
-                    <li>Витрина не загружается из Excel: у новых позиций 0, ручное количество существующих сохраняется в пределах остатка. При уменьшении остатка витрина не может превышать его.</li>
-                    <li>Поддерживается и исходная таблица Emansi с её заголовками. При ошибке импорт целиком отменяется.</li>
-                </ul>
-                <label for="import-file">Excel с товарами, до 5 МБ</label>
-                <input id="import-file" name="file" type="file" accept=".xlsx" required>
-                <p class="dialog-status" role="status"></p>
-                <button type="submit">Импортировать</button>
-            </form>
-        </dialog>
+{% with import_template_url="/one_alma/import/template" %}{% include "import_dialog.html" %}{% endwith %}
 <dialog class="inventory-dialog sales-dialog" id="sale-dialog" aria-labelledby="sale-heading"><form id="sale-form"><div class="dialog-heading"><h2 id="sale-heading">Продажа</h2><button class="close-dialog" type="button" data-close aria-label="Закрыть продажу">×</button></div><p class="product-context" id="sale-context"></p><div class="product-form-grid"><div><label for="sale-article">Артикул</label><input id="sale-article" readonly></div><div><label for="sale-date">Дата продажи · Москва, UTC+3</label><input id="sale-date" readonly></div><div class="wide-field"><label for="sale-customer">Кому</label><input id="sale-customer" maxlength="200" placeholder="Имя, компания или пометка" autocomplete="off"></div><div class="wide-field"><label for="sale-price">Цена за 1 шт., ₽</label><input id="sale-price" inputmode="decimal" placeholder="—" maxlength="24"><p class="field-note" id="sale-price-note"></p><p class="error" id="sale-price-error" role="alert"></p></div><div class="wide-field"><div class="quantity-line"><label for="sale-quantity">Количество, шт.</label><div class="count-stepper"><button type="button" id="sale-minus" aria-label="Уменьшить количество">−</button><input id="sale-quantity" value="1" type="number" min="1" step="1" required><button type="button" id="sale-plus" aria-label="Увеличить количество">+</button></div></div><p class="field-note" id="sale-stock"></p><p class="error" id="sale-quantity-error" role="alert"></p></div></div><div class="sale-total"><span>Сумма продажи</span><strong id="sale-total">—</strong></div><p class="error" id="sale-error" role="alert"></p><div class="dialog-actions"><button type="button" class="quiet" id="sale-history">История</button><button type="submit" class="primary" id="sale-save">Оформить продажу</button></div></form></dialog>
 <dialog id="history-dialog" class="inventory-dialog sales-history" aria-labelledby="history-heading"><div class="dialog-heading"><h2 id="history-heading">История</h2><button class="close-dialog" data-close aria-label="Закрыть историю">×</button></div><p class="product-context" id="history-context"></p><div class="history-top" id="history-summary"></div><div id="history-content"></div></dialog>
 <dialog class="inventory-dialog sales-dialog" id="undo-dialog" aria-labelledby="undo-heading"><div class="dialog-heading"><h2 id="undo-heading">Отменить продажу?</h2><button class="close-dialog" data-close aria-label="Закрыть отмену">×</button></div><p id="undo-text" class="confirm-text"></p><p class="field-note">Штуки вернутся в остаток. Запись останется в истории с пометкой «Отменена». Количество на витрине можно изменить вручную.</p><p class="error" id="undo-error" role="alert"></p><div class="dialog-actions"><button class="quiet" data-close>Оставить продажу</button><button id="undo-confirm" class="primary">Отменить продажу</button></div></dialog>

@@ -1,16 +1,39 @@
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
+from ..excel_validation import validate_xlsx_upload, validation_message
 from .models import InventoryItem
 
 logger = logging.getLogger(__name__)
+
+
+IMPORT_LABELS = {
+    "article": "Артикул",
+    "brand": "Бренд",
+    "name": "Наименование",
+    "purchase_price": "Закупочная стоимость",
+    "sale_price": "Цена продажи",
+    "expiry": "Годен до",
+    "quantity": "Количество",
+}
+
+
+@dataclass(frozen=True)
+class ImportInspection:
+    items: list[InventoryItem]
+    rows: list[dict]
+
+    @property
+    def valid(self) -> bool:
+        return bool(self.rows) and all(not row["error"] for row in self.rows)
 
 
 class InventoryExcelImporter:
@@ -27,11 +50,36 @@ class InventoryExcelImporter:
         "quantity": ("количество", "кол-во"),
     }
 
+    @staticmethod
+    def template() -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        assert sheet is not None
+        sheet.title = "Импорт"
+        sheet.append(list(IMPORT_LABELS.values()))
+        sheet.freeze_panes = "A2"
+        for column in "ABCDEFG":
+            sheet.column_dimensions[column].width = 24 if column != "C" else 55
+        sheet.column_dimensions["A"].number_format = "@"
+        sheet.column_dimensions["F"].number_format = "@"
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+        return output.getvalue()
+
     def parse(self, content: bytes, filename: str) -> list[InventoryItem]:
-        if not filename.lower().endswith(".xlsx") or not content:
-            raise ValueError("Выберите файл .xlsx.")
-        if len(content) > self.max_file_size:
-            raise ValueError("Размер файла не должен превышать 5 МБ.")
+        inspection = self.inspect(content, filename)
+        self.require_valid(inspection)
+        return inspection.items
+
+    @staticmethod
+    def require_valid(inspection: ImportInspection) -> None:
+        errors = [f"Строка {row['row']}: {row['error']}" for row in inspection.rows if row["error"]]
+        if errors:
+            raise ValueError("\n".join(errors) + " Импорт отменён.")
+
+    def inspect(self, content: bytes, filename: str) -> ImportInspection:
+        validate_xlsx_upload(content, filename, self.max_file_size)
         prepared = self._prepare_archive(content)
         try:
             workbook = load_workbook(BytesIO(prepared), read_only=True, data_only=False, keep_links=False)
@@ -50,19 +98,30 @@ class InventoryExcelImporter:
             if len(candidates) != 1:
                 raise ValueError("Нужен один лист с колонками «Наименование» / «Название» и «Кол-во» / «Количество».")
             sheet, header_row, headers = candidates[0]
-            items = []
+            items_by_row = {}
+            rows: list[dict] = []
             for row_number, row in enumerate(
                 sheet.iter_rows(min_row=header_row + 1, max_col=64, values_only=True), header_row + 1
             ):
                 if not any(value is not None and str(value).strip() for value in row):
                     continue
-                # Totals in warehouse exports can be in any column.
                 if any(re.match(r"^(итого|всего)(?:\s|:|$)", str(value or "").strip(), re.I) for value in row[:3]):
                     continue
+                values = {field: row[column] for field, column in headers.items()}
+                display = {field: self._text(value)[:300] for field, value in values.items()}
+                if "price" in display and "sale_price" not in display:
+                    display["sale_price"] = display["price"]
+                view = {"row": row_number, "error": "", "after": display}
                 try:
-                    values = {field: row[column] for field, column in headers.items()}
-                    if any(isinstance(value, str) and value.startswith("=") for value in values.values()):
-                        raise ValueError("Замените формулы значениями.")
+                    formula_fields = [
+                        field for field, value in values.items() if isinstance(value, str) and value.startswith("=")
+                    ]
+                    if formula_fields:
+                        raise ValueError(
+                            "; ".join(
+                                f"{IMPORT_LABELS.get(field, 'Цена')}: замените формулу значением" for field in formula_fields
+                            )
+                        )
                     result = {field: self._text(value) for field, value in values.items() if field not in ("price", "quantity")}
                     if "price" in values and "sale_price" not in values:
                         result["sale_price"] = self._text(values["price"])
@@ -71,21 +130,34 @@ class InventoryExcelImporter:
                         result["expiry"] = expiry.strftime("%m.%Y")
                     quantity = str(values["quantity"]).strip()
                     if not re.fullmatch(r"[0-9]+(?:\.0+)?", quantity):
-                        raise ValueError("Количество должно быть целым неотрицательным числом.")
-                    items.append(InventoryItem(**result, quantity=int(quantity.split(".", 1)[0])))
-                except (ValueError, TypeError, ValidationError) as exc:
-                    detail = (
-                        "Проверьте длину полей, числовой артикул, количество и срок годности."
-                        if isinstance(exc, ValidationError)
-                        else str(exc)
-                    )
-                    raise ValueError(f"Строка {row_number}: {detail} Импорт отменён.") from None
-                if len(items) > self.max_rows:
+                        raise ValueError("Количество: укажите целое неотрицательное число")
+                    item = InventoryItem(**result, quantity=int(quantity.split(".", 1)[0]))
+                    items_by_row[row_number] = item
+                    view["after"] = item.model_dump() | {"quantity": str(item.quantity)}
+                except ValidationError as exc:
+                    view["error"] = validation_message(exc, IMPORT_LABELS)
+                except (ValueError, TypeError) as exc:
+                    view["error"] = str(exc)
+                rows.append(view)
+                if len(rows) > self.max_rows:
                     raise ValueError("За один импорт допускается до 10 000 товаров.")
-            if not items:
+            if not rows:
                 raise ValueError("В файле нет товаров.")
-            logger.info("Excel инвентаризации прочитан: строк товаров %s", len(items))
-            return items
+            articles: dict[str, list[dict]] = {}
+            for checked in rows:
+                article = str(checked["after"].get("article", "")).strip()
+                if article:
+                    articles.setdefault(article, []).append(checked)
+            for article, matches in articles.items():
+                if len(matches) > 1:
+                    for checked in matches:
+                        detail = f"Артикул: {article} повторяется в Excel; оставьте одну строку на артикул"
+                        checked["error"] = "; ".join(filter(None, (checked["error"], detail)))
+                        items_by_row.pop(checked["row"], None)
+            logger.info(
+                "Excel инвентаризации проверен: строк %s, с ошибками %s", len(rows), sum(bool(row["error"]) for row in rows)
+            )
+            return ImportInspection(list(items_by_row.values()), rows)
         finally:
             workbook.close()
 

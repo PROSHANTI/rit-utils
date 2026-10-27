@@ -3,13 +3,14 @@
     const status = document.getElementById('save-status');
     const download = container.querySelector('.download-pdf');
     const tableBody = container.querySelector('.inventory-table tbody');
-    const selections = [...container.querySelectorAll('.select-product')];
-    const selectAll = document.getElementById('select-all');
-    const deleteSelected = document.getElementById('delete-selected');
     const productDialog = document.getElementById('product-dialog');
     const productForm = document.getElementById('product-form');
     const importDialog = document.getElementById('import-dialog');
     const importForm = document.getElementById('import-form');
+    let importFingerprint = '';
+    let importValid = false;
+    const importSubmit = document.getElementById('import-submit');
+    const importPreview = document.getElementById('import-preview');
     const csrfToken = container.dataset.csrfToken;
     const countEditor = document.getElementById('count-editor');
     const countForm = document.getElementById('count-form');
@@ -69,20 +70,11 @@
         return error instanceof TypeError ? 'Нет связи с сервером. Повторите действие.' : error.message;
     }
 
-    function updateSelection() {
-        const selected = selections.filter(input => input.checked).length;
-        document.getElementById('selection-count').textContent = `Выбрано: ${selected}`;
-        deleteSelected.disabled = selected === 0;
-        selectAll.checked = selected > 0 && selected === selections.length;
-        selectAll.indeterminate = selected > 0 && selected < selections.length;
-    }
-
     function setBusy(value) {
         busy = value;
         container.querySelectorAll('button, input').forEach(control => { control.disabled = busy; });
         download.setAttribute('aria-disabled', String(busy));
         if (!busy) {
-            updateSelection();
             tableBody.querySelectorAll('[data-count-kind="showcase"]').forEach(button => {
                 const row = button.closest('tr');
                 button.disabled = Number(row.dataset.quantity) === Number(row.dataset.sold);
@@ -252,12 +244,6 @@
         }
     });
 
-    selectAll.addEventListener('change', () => {
-        selections.forEach(input => { input.checked = selectAll.checked; });
-        updateSelection();
-    });
-    selections.forEach(input => { input.addEventListener('change', updateSelection); });
-
     function openProduct(row = null) {
         productForm.reset();
         productForm.querySelector('.dialog-status').textContent = '';
@@ -277,7 +263,7 @@
     document.getElementById('add-product').addEventListener('click', () => { openProduct(); });
     document.getElementById('import-products').addEventListener('click', () => {
         importForm.reset();
-        importForm.querySelector('.dialog-status').textContent = '';
+        resetImport();
         importDialog.showModal();
     });
     container.querySelectorAll('.close-dialog').forEach(button => {
@@ -307,13 +293,47 @@
         const id = productForm.dataset.productId;
         submitForm(productForm, id ? `/one_alma/products/${id}` : '/one_alma/products', id ? 'PUT' : 'POST');
     });
-    importForm.addEventListener('submit', event => {
+    function resetImport() {
+        importFingerprint = '';
+        importValid = false;
+        window.ExcelImportDialog.reset(importDialog);
+    }
+    importForm.elements.file.addEventListener('change', resetImport);
+
+    function renderImportPreview(preview) {
+        const summary = preview.already_imported ? 'Эта поставка уже загружена. Остатки не изменятся.' :
+            `Новых позиций: ${preview.added}. Пополнятся: ${preview.updated}. Приход: ${preview.quantity} шт.`;
+        const rows = preview.rows.map(item => ({...item,
+            details: [item.volume && `Объём: ${item.volume}`, item.expiry && `Годен до: ${item.expiry}`],
+            result: preview.already_imported ? 'Уже загружено' : item.action,
+        }));
+        importValid = window.ExcelImportDialog.render(importDialog, {rows, summary, valid: preview.valid, alreadyImported: preview.already_imported});
+        importFingerprint = importValid ? preview.fingerprint : '';
+    }
+
+    importForm.addEventListener('submit', async event => {
         event.preventDefault();
-        submitForm(importForm, '/one_alma/import', 'POST');
+        if (busy) return;
+        const body = new FormData(importForm);
+        body.set('csrf_token', csrfToken);
+        if (importFingerprint) body.set('fingerprint', importFingerprint);
+        setBusy(true);
+        const message = importForm.querySelector('.dialog-status');
+        message.textContent = importFingerprint ? 'Сохраняю приход…' : 'Проверяю файл…';
+        try {
+            const data = await api('/one_alma/import', {method: 'POST', body});
+            if (data.preview) renderImportPreview(data.preview);
+            else { window.location.reload(); return; }
+        } catch (error) {
+            message.textContent = errorMessage(error);
+        } finally {
+            setBusy(false);
+            importSubmit.disabled = !importPreview.hidden && !importValid;
+        }
     });
 
     async function deleteProducts(ids) {
-        if (!window.confirm(`Удалить выбранные позиции (${ids.length})? История оформленных продаж сохранится.`)) return;
+        if (!window.confirm('Удалить товар? История оформленных продаж сохранится.')) return;
         const body = new URLSearchParams({csrf_token: csrfToken});
         ids.forEach(id => { body.append('product_ids', id); });
         setBusy(true);
@@ -329,7 +349,6 @@
         }
     }
 
-    deleteSelected.addEventListener('click', () => { deleteProducts(selections.filter(input => input.checked).map(input => input.value)); });
     container.querySelectorAll('.delete-product').forEach(button => {
         button.addEventListener('click', () => { deleteProducts([button.closest('tr').dataset.productId]); });
     });
@@ -490,7 +509,6 @@
     setInterval(() => {
         if (saleDialog.open) document.getElementById('sale-date').value = moscowTime(new Date());
     }, 1000);
-    updateSelection();
     sortRows();
     setInterval(() => { refreshSession().catch(() => {}); }, 10 * 60 * 1000);
 })();

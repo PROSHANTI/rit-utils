@@ -5,7 +5,7 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -37,6 +37,7 @@ class InventoryHandler:
         self.router.add_api_route("/snapshots", self.create_snapshot, methods=["POST"], response_model=None)
         self.router.add_api_route("/history", self.history, methods=["GET"], response_model=None)
         self.router.add_api_route("/history/{snapshot_id}", self.delete_snapshot, methods=["DELETE"], response_model=None)
+        self.router.add_api_route("/import/template", self.import_template, methods=["GET"], response_model=None)
         self.router.add_api_route("/import", self.import_excel, methods=["POST"], response_model=None)
         self.router.add_api_route("/pdf", self.download_pdf, methods=["GET"], response_model=None)
 
@@ -141,6 +142,13 @@ class InventoryHandler:
             lambda: self.repository.delete_snapshot(snapshot_id), "Инвентаризация удалена", object_id=snapshot_id
         )
 
+    def import_template(self) -> Response:
+        return Response(
+            InventoryExcelImporter.template(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="inventory.xlsx"', "Cache-Control": "no-store"},
+        )
+
     def import_excel(
         self,
         file: UploadFile = File(...),
@@ -148,11 +156,21 @@ class InventoryHandler:
     ) -> Response:
         def run() -> dict[str, object]:
             importer = InventoryExcelImporter()
-            items = importer.parse(file.file.read(importer.max_file_size + 1), file.filename or "")
+            inspection = importer.inspect(file.file.read(importer.max_file_size + 1), file.filename or "")
             if not fingerprint:
-                logger.debug("Предварительная сверка импорта: строк %s", len(items))
-                return {"preview": self.repository.preview_import(items)}
-            result = self.repository.import_items(items, fingerprint)
+                preview = self.repository.preview_import(inspection.items, collect_errors=True)
+                planned = iter(cast(list[dict], preview["rows"]))
+                rows = []
+                for row in inspection.rows:
+                    if row["error"]:
+                        rows.append({"id": None, "action": "error", "before": None, **row})
+                    else:
+                        rows.append({"row": row["row"], "error": "", **next(planned)})
+                preview.update(rows=rows, valid=inspection.valid and all(not row["error"] for row in rows))
+                logger.debug("Предварительная сверка импорта: строк %s", len(rows))
+                return {"preview": preview}
+            importer.require_valid(inspection)
+            result = self.repository.import_items(inspection.items, fingerprint)
             logger.info("Импорт товаров завершён: добавлено %s, обновлено %s", result["added"], result["updated"])
             return {"detail": f"Добавлено: {result['added']}. Обновлено: {result['updated']}."}
 

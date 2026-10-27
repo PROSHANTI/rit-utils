@@ -122,11 +122,13 @@ class InventoryRepository:
             item = InventoryItem(**({key: row[key] for key in InventoryItem.model_fields} | {"quantity": value}))
             connection.execute("UPDATE inventory_products SET quantity=? WHERE id=?", (item.quantity, item_id))
 
-    def preview_import(self, items: list[InventoryItem]) -> dict[str, object]:
+    def preview_import(self, items: list[InventoryItem], *, collect_errors: bool = False) -> dict[str, object]:
         with self._connection() as connection:
-            return self._import_plan(connection, items)
+            return self._import_plan(connection, items, collect_errors=collect_errors)
 
-    def _import_plan(self, connection: sqlite3.Connection, items: list[InventoryItem]) -> dict[str, object]:
+    def _import_plan(
+        self, connection: sqlite3.Connection, items: list[InventoryItem], *, collect_errors: bool = False
+    ) -> dict[str, object]:
         existing = self._items(connection)
         fingerprint = hashlib.sha256(json.dumps([item.model_dump() for item in existing], sort_keys=True).encode()).hexdigest()
         articles: dict[str, list[StoredItem]] = {}
@@ -134,14 +136,18 @@ class InventoryRepository:
             if stored.article:
                 articles.setdefault(stored.article, []).append(stored)
         seen = set()
-        rows = []
+        rows: list[dict] = []
         for item in items:
             if item.article and item.article in seen:
                 raise ValueError(f"Артикул {item.article} повторяется в Excel. Оставьте одну строку на артикул.")
             seen.add(item.article)
             matches = articles.get(item.article, []) if item.article else []
             if len(matches) > 1:
-                raise ValueError(f"Артикул {item.article} найден у нескольких товаров. Уточните артикулы перед импортом.")
+                detail = f"Артикул: {item.article} найден у нескольких товаров; уточните артикулы перед импортом"
+                if not collect_errors:
+                    raise ValueError(detail)
+                rows.append({"id": None, "action": "error", "before": None, "after": item.model_dump(), "error": detail})
+                continue
             previous = matches[0] if matches else None
             merged = (
                 InventoryItem(

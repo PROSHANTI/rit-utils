@@ -2,7 +2,7 @@
 .clinic-inventory { max-width: 1540px; margin: 0 auto; }
 .inventory-title { display: flex; justify-content: center; align-items: center; gap: 18px; margin: 4px 0 38px; }
 .inventory-title h1 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 42px; font-weight: 800; text-shadow: none; }
-.inventory-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.inventory-actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
 .clinic-inventory-page button, .inventory-dialog button { margin: 0; transition: background .15s, box-shadow .15s; }
 .clinic-inventory-page button:hover, .inventory-dialog button:hover { transform: none; }
 .action-button { display: flex; align-items: center; justify-content: center; width: auto; min-height: 49px; margin: 0; padding: 13px 18px; border: 0; border-radius: 8px; background: linear-gradient(100deg, #ff416c, #ff4b2b); color: white; font-size: 16px; font-weight: 650; text-align: center; text-decoration: none; cursor: pointer; }
@@ -12,8 +12,6 @@
 button:disabled { opacity: .45; cursor: default; filter: none; }
 button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ffa2b9; outline-offset: 3px; }
 .inventory-panel { border: 1px solid #ffffff1a; border-radius: 14px; background: #1e171be8; box-shadow: 0 10px 30px #0004; overflow: hidden; }
-.table-toolbar { display: flex; padding: 17px 20px; border-bottom: 1px solid #442a34; }
-.table-toolbar span { font-size: 17px; margin-right: 6px; }
 .table-scroll { overflow-x: auto; }
 .stock-table { width: 100%; min-width: 1110px; border-collapse: collapse; table-layout: fixed; font-size: 13px; text-align: left; }
 .stock-table col:nth-child(1) { width: 48px; }
@@ -67,13 +65,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .form-error { color: #ffabb9; font-size: 13px; line-height: 1.6; margin-top: 12px; }
 .form-error:empty { display: none; }
 .spaced-label { margin-top: 22px; }
-.import-note { font-size: 13px; color: #b9a4af; line-height: 1.75; margin-top: 22px; }
-.inventory-dialog.has-preview { width: min(1100px, calc(100vw - 28px)); }
-.import-preview-table { width: 100%; min-width: 690px; border-collapse: collapse; font-size: 12px; margin-top: 15px; }
-.import-preview-table th, .import-preview-table td { text-align: left; padding: 12px 9px; border-bottom: 1px solid #67434f; vertical-align: top; line-height: 1.6; }
-.import-preview-table th { background: #392631; color: #d7bbc9; }
-.import-preview-table td:last-child { white-space: pre-line; }
-.preview-summary { margin: 22px 0 7px; color: #b6edcc; font-size: 14px; }
 .history-dialog { width: min(1320px, calc(100vw - 28px)); }
 .history-entry { position: relative; margin: 12px 0; border: 1px solid #67434f; border-radius: 9px; background: #241920; overflow: hidden; }
 .history-entry summary { padding: 19px 150px 19px 18px; cursor: pointer; font-size: 14px; color: #eddae4; }
