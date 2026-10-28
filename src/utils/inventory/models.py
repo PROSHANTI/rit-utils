@@ -26,11 +26,28 @@ class ExpiryPolicy:
         return value
 
     @staticmethod
-    def status(value: str, today: date | None = None) -> Literal["normal", "soon", "expired"]:
+    def expires_on(value: str) -> date | None:
         if not value:
-            return "normal"
+            return None
         month, year = map(int, value.split("."))
-        expires = date(year, month, calendar.monthrange(year, month)[1])
+        return date(year, month, calendar.monthrange(year, month)[1])
+
+    @classmethod
+    def tooltip(cls, value: str, today: date | None = None) -> str:
+        expires = cls.expires_on(value)
+        if expires is None:
+            return "Срок не указан"
+        current = today or datetime.now(MOSCOW).date()
+        remaining = (expires - current).days
+        description = f"Просрочено: {-remaining} дн." if remaining < 0 else f"Осталось: {remaining} дн."
+        formatted_date = f"{expires.day:02d}.{expires.month:02d}.{expires.year:04d}"
+        return f"Годен до {formatted_date} включительно. {description}"
+
+    @classmethod
+    def status(cls, value: str, today: date | None = None) -> Literal["normal", "soon", "expired"]:
+        expires = cls.expires_on(value)
+        if expires is None:
+            return "normal"
         today = today or datetime.now(MOSCOW).date()
         if expires < today:
             return "expired"
@@ -85,7 +102,12 @@ class StoredItem(InventoryItem):
         )
 
     def view(self, today: date | None = None) -> dict[str, object]:
-        return self.model_dump() | {"quantity": str(self.quantity), "expiry_status": ExpiryPolicy.status(self.expiry, today)}
+        current = today or datetime.now(MOSCOW).date()
+        return self.model_dump() | {
+            "quantity": str(self.quantity),
+            "expiry_status": ExpiryPolicy.status(self.expiry, current),
+            "expiry_title": ExpiryPolicy.tooltip(self.expiry, current),
+        }
 
 
 class QuantityChange(BaseModel):

@@ -3,9 +3,10 @@ import logging
 import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from zipfile import ZipFile
+from zoneinfo import ZoneInfo
 
 import pytest
 from openpyxl import Workbook
@@ -163,6 +164,59 @@ def test_history_is_immutable_and_deleted_intervals_rejoin(store):
 )
 def test_expiry_uses_six_calendar_months_and_month_end(expiry, today, status):
     assert ExpiryPolicy.status(expiry, today) == status
+
+
+@pytest.mark.parametrize(
+    "expiry,today,expected",
+    [
+        ("02.2027", date(2026, 10, 28), "Годен до 28.02.2027 включительно. Осталось: 123 дн."),
+        ("10.2024", date(2026, 10, 28), "Годен до 31.10.2024 включительно. Просрочено: 727 дн."),
+        ("02.2028", date(2028, 2, 28), "Годен до 29.02.2028 включительно. Осталось: 1 дн."),
+        ("02.2028", date(2028, 2, 29), "Годен до 29.02.2028 включительно. Осталось: 0 дн."),
+        ("02.2028", date(2028, 3, 1), "Годен до 29.02.2028 включительно. Просрочено: 1 дн."),
+        ("12.2026", date(2027, 1, 1), "Годен до 31.12.2026 включительно. Просрочено: 1 дн."),
+        ("01.0001", date(1, 1, 1), "Годен до 31.01.0001 включительно. Осталось: 30 дн."),
+        ("", date(2026, 10, 28), "Срок не указан"),
+    ],
+)
+def test_expiry_tooltip_includes_month_end_and_exact_days(expiry, today, expected):
+    result = ExpiryPolicy.tooltip(expiry, today)
+
+    assert result == expected
+
+
+def test_expiry_tooltip_and_status_share_moscow_date_after_utc_day_boundary(monkeypatch):
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz == ZoneInfo("Europe/Moscow")
+            return datetime(2026, 10, 31, 21, 0, tzinfo=ZoneInfo("UTC")).astimezone(tz)
+
+    monkeypatch.setattr("src.utils.inventory.models.datetime", FixedDatetime)
+    product = StoredItem(id=1, name="Крем", expiry="10.2026")
+
+    view = product.view()
+
+    assert view["expiry_status"] == "expired"
+    assert view["expiry_title"] == "Годен до 31.10.2026 включительно. Просрочено: 1 дн."
+
+
+def test_inventory_api_returns_expiry_tooltip_for_current_products(authenticated_client, store):
+    store.add(item())
+
+    response = authenticated_client.get("/inventory/items")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["expiry_title"] == ExpiryPolicy.tooltip("09.2026")
+
+
+def test_historical_expiry_tooltip_uses_snapshot_date():
+    product = StoredItem(id=1, name="Крем", expiry="02.2028")
+
+    view = product.view(date(2028, 2, 29))
+
+    assert view["expiry_title"] == "Годен до 29.02.2028 включительно. Осталось: 0 дн."
+    assert view["expiry_status"] == "soon"
 
 
 @pytest.mark.parametrize(

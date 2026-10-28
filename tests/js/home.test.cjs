@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const { LoveNoteDeck, CatPhotoLoader, wishes, affections, total, storageKey } = require('../../templates/home.js');
+const { InventoryPage } = require('../../templates/inventory.js');
 
 test('the shared background pauses initially and resumes when the page becomes visible', () => {
     const classes = new Set(), listeners = new Map();
@@ -27,6 +28,87 @@ function memoryStorage() {
     const values = new Map();
     return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 }
+
+function inventoryExpiryWatcher() {
+    let now = new Date('2026-10-28T20:59:00Z'), update, calls = 0, fail = false;
+    const listeners = new Map(), statuses = [];
+    const document = { hidden: false, addEventListener: (name, callback) => listeners.set(name, callback) };
+    const context = {
+        module: { exports: {} }, Intl,
+        Date: class extends Date { constructor() { super(now); } },
+        document,
+        window: { addEventListener: (name, callback) => listeners.set(name, callback) },
+        setInterval: (callback, delay) => { assert.equal(delay, 60000); update = callback; },
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../templates/inventory.js'), 'utf8'), context);
+    context.module.exports.InventoryPage.prototype.watchExpiryDay.call({
+        refresh: async () => { calls++; if (fail) throw new Error('Temporary network failure'); },
+        status: (...values) => statuses.push(values),
+    });
+    return {
+        document, listeners, statuses,
+        setNow: value => { now = new Date(value); },
+        setFailure: value => { fail = value; },
+        tick: () => update(), calls: () => calls,
+    };
+}
+
+test('inventory rows attach the complete server tooltip to the expiry cell', () => {
+    const page = Object.create(InventoryPage.prototype);
+    page.element = (tag, text) => ({ tag, textContent: text, children: [], append(...nodes) { this.children.push(...nodes); } });
+    const product = {
+        id: 1, name: 'Крем', expiry: '02.2027', expiry_status: 'soon', quantity: '2',
+        expiry_title: 'Годен до 28.02.2027 включительно. Осталось: 123 дн.',
+    };
+
+    const row = page.productRow(product, true);
+    const empty = page.productRow({ ...product, expiry: '', expiry_title: 'Срок не указан' }, true);
+
+    assert.equal(row.children[6].textContent, '02.2027');
+    assert.equal(row.children[6].title, product.expiry_title);
+    assert.equal(empty.children[6].title, 'Срок не указан');
+});
+
+test('inventory expiry refreshes once at Moscow midnight without requiring a page reload', async () => {
+    const watcher = inventoryExpiryWatcher();
+
+    await watcher.tick();
+    const beforeMidnight = watcher.calls();
+    watcher.setNow('2026-10-28T21:00:00Z');
+    await watcher.tick();
+    await watcher.tick();
+    await watcher.listeners.get('focus')();
+
+    assert.equal(beforeMidnight, 0);
+    assert.equal(watcher.calls(), 1);
+});
+
+test('a hidden inventory tab updates its expiry tooltips when it becomes visible', async () => {
+    const watcher = inventoryExpiryWatcher();
+    watcher.document.hidden = true;
+    watcher.setNow('2026-10-28T21:00:00Z');
+
+    await watcher.tick();
+    const whileHidden = watcher.calls();
+    watcher.document.hidden = false;
+    await watcher.listeners.get('visibilitychange')();
+
+    assert.equal(whileHidden, 0);
+    assert.equal(watcher.calls(), 1);
+});
+
+test('a failed inventory midnight refresh is retried on the next check', async () => {
+    const watcher = inventoryExpiryWatcher();
+    watcher.setNow('2026-10-28T21:00:00Z');
+    watcher.setFailure(true);
+
+    await watcher.tick();
+    watcher.setFailure(false);
+    await watcher.tick();
+
+    assert.equal(watcher.calls(), 2);
+    assert.deepEqual(watcher.statuses, [['Temporary network failure', true]]);
+});
 
 function loginCountdown(seconds) {
     const password = { disabled: true }, button = { disabled: true }, listeners = new Map(), timers = new Map();

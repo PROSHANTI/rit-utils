@@ -17,6 +17,7 @@ class InventoryPage {
         this.columns = ["№", "Артикул", "Бренд", "Название", "Закупочная стоимость", "Цена продажи", "Срок годности", "Количество"];
         this.bind();
         this.refresh().catch(error => this.status(error.message, true));
+        this.watchExpiryDay();
     }
 
     element(tag, text, className) {
@@ -125,10 +126,29 @@ class InventoryPage {
         } else result.items.forEach(item => body.append(this.productRow(item)));
     }
 
+    watchExpiryDay() {
+        const calendar = new Intl.DateTimeFormat("en-CA", {timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit"});
+        let lastDay = calendar.format(new Date());
+        const update = async () => {
+            if (document.hidden) return;
+            const day = calendar.format(new Date());
+            if (day === lastDay) return;
+            lastDay = day;
+            try { await this.refresh(); }
+            catch (error) {
+                lastDay = "";
+                this.status(error.message, true);
+            }
+        };
+        setInterval(update, 60000);
+        document.addEventListener("visibilitychange", update);
+        window.addEventListener("focus", update);
+    }
+
     productRow(item, historical = false) {
         const row = this.element("tr", undefined, `expiry-${item.expiry_status}`);
         [item.id, item.article, item.brand, item.name, item.purchase_price, item.sale_price, item.expiry].forEach(value => row.append(this.element("td", String(value || "—"))));
-        row.children[6].title = item.expiry_status === "expired" ? "Срок годности истёк" : item.expiry_status === "soon" ? "Срок годности истекает в течение шести месяцев" : "";
+        row.children[6].title = item.expiry_title || "Срок не указан";
         const quantity = this.element("td");
         if (historical) quantity.textContent = item.quantity;
         else {
@@ -338,4 +358,5 @@ class InventoryPage {
     }
 }
 
-new InventoryPage(document.querySelector(".clinic-inventory"));
+if (typeof module !== "undefined" && module.exports) module.exports = {InventoryPage};
+else new InventoryPage(document.querySelector(".clinic-inventory"));
