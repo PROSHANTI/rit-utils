@@ -3,7 +3,7 @@ import logging
 from collections.abc import Callable
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from src.auth import AuthenticationService
@@ -12,6 +12,7 @@ from src.utils.gen_cert.gen_cert_handler import CertificateGenerator, Certificat
 from src.utils.inventory.inventory_handler import InventoryHandler
 from src.utils.one_alma.models import NewProduct
 from src.utils.one_alma.one_alma_handler import OneAlmaHandler
+from src.utils.random_cat import RandomCatService
 from src.utils.remove_bg.remove_bg_handler import RemoveBackgroundHandler
 from src.utils.send_email.email_handler import EmailHandler
 
@@ -27,14 +28,15 @@ class ApplicationRouter:
         self.images = RemoveBackgroundHandler()
         self.one_alma = OneAlmaHandler()
         self.inventory = InventoryHandler()
+        self.cats = RandomCatService()
         self.templates = Jinja2Templates(directory="templates")
         self.dependencies = [auth.dependency()]
         self.router = APIRouter()
         self._register_routes()
 
-    def login(self, request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
+    def login(self, request: Request, password: str = Form(...)) -> Response:
         logger.debug("Обработка запроса авторизации")
-        return self.auth.login(request, username, password)
+        return self.auth.login(request, password)
 
     def logout(self, request: Request) -> Response:
         logger.debug("Обработка запроса выхода из системы")
@@ -53,6 +55,9 @@ class ApplicationRouter:
     def home_page(self, request: Request) -> Response:
         logger.debug("Отображение домашней страницы")
         return self.templates.TemplateResponse(request, "home.html")
+
+    def random_cat(self) -> Response:
+        return JSONResponse(self.cats.image(), headers={"Cache-Control": "no-store"})
 
     def send_email(self, request: Request) -> Response:
         return self._status_page(
@@ -240,6 +245,7 @@ class ApplicationRouter:
             ("/refresh", self.refresh_token, ["POST"], False, "Обновить токен доступа", ["Авторизация"]),
             ("/", self.root, ["GET", "HEAD"], False, "Отображает домашнюю страницу", ["Главная страница"]),
             ("/home", self.home_page, ["GET"], True, "Отобразить домашнюю страницу", ["Домашняя страница"]),
+            ("/home/cat", self.random_cat, ["GET"], True, "Показать случайного котика", ["Домашняя страница"]),
             ("/send_email", self.send_email, ["GET"], True, "Страница отправки отчета", ["Отправка отчета"]),
             ("/send_email", self.send_email_endpoint, ["POST"], True, "Отправить отчет на почту", ["Отправка отчета"]),
             (

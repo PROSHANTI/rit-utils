@@ -8,13 +8,16 @@
     <link rel="stylesheet" href="/static/css/style_utils.css">
     <link rel="stylesheet" href="/static/css/inventory.css?v=import-ui-1">
     <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
+    <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
     <script src="/static/inventory.js?v=import-ui-1" defer></script>
+    {% include "ambient_background_head.html" %}
 </head>
 <body class="clinic-inventory-page">
+    {% include "ambient_background.html" %}
 <main class="clinic-inventory" data-csrf-token="{{ csrf_token }}">
     <header class="inventory-title">
-        <img src="/static/images/inventory.svg" width="52" height="52" alt="">
+        <img class="neon-icon" src="/static/images/neon/inventory.svg" width="36" height="36" alt="">
         <h1>Инвентаризация</h1>
     </header>
     <nav class="inventory-actions" aria-label="Действия с инвентаризацией">

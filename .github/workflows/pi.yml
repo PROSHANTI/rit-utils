@@ -35,6 +35,11 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Set up Node.js for browser logic tests
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
       - name: Install uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
@@ -54,7 +59,6 @@ jobs:
 
       - name: Unit tests
         env:
-          LOGIN: test_user
           PASSWORD: test_password
           JWT_SECRET_KEY: test-secret-key-for-ci
           SEND_FROM: test@example.com
@@ -64,6 +68,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run --locked pytest
+          node --test tests/js/home.test.cjs
           uv run --locked python deploy/pi/test_updater.py
           uv run --locked python .github/scripts/test_notify_pi.py
 

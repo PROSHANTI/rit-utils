@@ -8,14 +8,17 @@
     <link rel="stylesheet" href="/static/css/style_utils.css">
     <link rel="stylesheet" href="/static/css/one_alma.css?v=table-headers-2">
     <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
+    <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
     <script src="/static/one_alma_expiry.js?v=import-ui-1" defer></script>
     <script src="/static/one_alma.js?v=import-ui-1" defer></script>
+    {% include "ambient_background_head.html" %}
 </head>
 <body class="inventory-page">
+    {% include "ambient_background.html" %}
     <main class="inventory-container" data-csrf-token="{{ csrf_token }}">
         <header class="inventory-heading">
-            <img src="/static/images/one_alma.svg" width="52" height="52" alt="">
+            <img class="neon-icon" src="/static/images/neon/one-alma.svg" width="36" height="36" alt="">
             <div class="logo">
                 <span>Учет OneAlma</span>
                 <p>Учет продажи товаров</p>
