@@ -18,7 +18,6 @@ def test_application_starts_without_private_email_template():
             "PATH": os.defpath,
             "PYTHONPATH": str(project),
             "JWT_SECRET_KEY": "public-test-key-for-local-startup",
-            "LOGIN": "test-user",
             "PASSWORD": "public-test-fixture",
         },
         capture_output=True,

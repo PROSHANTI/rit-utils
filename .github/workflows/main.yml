@@ -26,6 +26,11 @@ jobs:
         enable-cache: true
         cache-dependency-glob: uv.lock
 
+    - name: Set up Node.js for browser logic tests
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      with:
+        node-version: '24'
+
     - name: Install dependencies
       run: uv sync --locked
 
@@ -37,7 +42,6 @@ jobs:
 
     - name: Run pytest
       env:
-        LOGIN: test_user
         PASSWORD: test_password
         JWT_SECRET_KEY: test-secret-key-for-ci
         SEND_FROM: test@example.com
@@ -45,7 +49,9 @@ jobs:
         ADDR_TO: test@example.com
         BCC_TO: test@example.com
         PYTHONPATH: ${{ github.workspace }}
-      run: uv run --locked pytest
+      run: |
+        uv run --locked pytest
+        node --test tests/js/home.test.cjs
 
   build_and_push_to_docker_hub:
     name: Build and push Docker image to DockerHub

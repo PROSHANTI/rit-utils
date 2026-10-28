@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.responses import Response
+from fastapi.testclient import TestClient
 from httpx import Response as HttpResponse
 
+from src.auth.login import LoginThrottle
 from src.main import application
 from src.utils.doctor_form.doctor_form_handler import DoctorFormRequest
 from src.utils.gen_cert.gen_cert_handler import CertificateRequest
@@ -35,6 +37,8 @@ class TestAuthEndpoints:
         assert response.status_code == 200
         assert 'action="/login"' in response.text
         assert response.headers["content-type"].startswith("text/html")
+        assert 'name="password"' in response.text and 'name="username"' not in response.text
+        assert 'autocomplete="current-password"' in response.text
 
     def test_root_with_session_redirects_home(self, authenticated_client):
         response = authenticated_client.get("/", follow_redirects=False)
@@ -49,19 +53,18 @@ class TestAuthEndpoints:
         assert response.content == b""
 
     def test_invalid_credentials_render_login_error(self, client):
-        response = client.post("/login", data={"username": "wrong_user", "password": "wrong_pass"}, follow_redirects=False)
+        response = client.post("/login", data={"password": "wrong_pass"}, follow_redirects=False)
 
         assert response.status_code == 401
-        assert "Неверный логин или пароль" in response.text
+        assert "Неверный пароль" in response.text
+        assert "Осталось попыток: 9" in response.text
         assert not response.headers.get_list("set-cookie")
 
     def test_valid_credentials_set_protected_session_cookies(self, authenticated_client):
         access_name = application.auth.config.JWT_ACCESS_COOKIE_NAME
         refresh_name = application.auth.config.JWT_REFRESH_COOKIE_NAME
 
-        response = authenticated_client.post(
-            "/login", data={"username": "test_admin", "password": "test_password"}, follow_redirects=False
-        )
+        response = authenticated_client.post("/login", data={"password": "test_password"}, follow_redirects=False)
         home_response = authenticated_client.get("/home")
 
         cookies = _response_cookies(response)
@@ -77,6 +80,58 @@ class TestAuthEndpoints:
 
         assert cookies[refresh_name]["max-age"] == f"{7 * 24 * 60 * 60}"
         assert home_response.status_code == 200
+
+    def test_two_browsers_can_keep_independent_authenticated_sessions(self, app):
+        with TestClient(app, base_url="https://testserver") as computer, TestClient(app, base_url="https://testserver") as phone:
+            first = computer.post("/login", data={"password": "test_password"}, follow_redirects=False)
+            second = phone.post("/login", data={"password": "test_password"}, follow_redirects=False)
+            computer.post("/logout", follow_redirects=False)
+            phone_page = phone.get("/home")
+
+        assert first.status_code == second.status_code == 303
+        assert (
+            _response_cookies(first)["JWT_ACCESS_TOKEN_COOKIE"].value
+            != _response_cookies(second)["JWT_ACCESS_TOKEN_COOKIE"].value
+        )
+        assert phone_page.status_code == 200
+
+    def test_tenth_failure_blocks_other_browsers_and_page_reload_until_timeout(self, client, app, monkeypatch):
+        now = [1000.0]
+        monkeypatch.setattr(application.auth, "login_throttle", LoginThrottle(clock=lambda: now[0]))
+
+        failures = [client.post("/login", data={"password": "wrong"}, follow_redirects=False) for _ in range(10)]
+        reloaded = client.get("/", follow_redirects=False)
+        with TestClient(app, base_url="https://testserver") as another_browser:
+            blocked = another_browser.post(
+                "/login", data={"password": "test_password"}, headers={"X-Forwarded-For": "198.51.100.9"}, follow_redirects=False
+            )
+        now[0] = 1300.0
+        accepted = client.post("/login", data={"password": "test_password"}, follow_redirects=False)
+
+        assert [response.status_code for response in failures] == [401] * 9 + [429]
+        assert failures[-1].headers["retry-after"] == "300"
+        assert reloaded.status_code == blocked.status_code == 429
+        assert 'data-seconds="300"' in reloaded.text and ">05:00</span>" in reloaded.text
+        assert 'class="hover-shine" disabled' in reloaded.text
+        assert not blocked.headers.get_list("set-cookie")
+        assert accepted.status_code == 303
+
+    def test_login_cooldown_does_not_interrupt_existing_session(self, client, authenticated_client):
+        for _ in range(10):
+            client.post("/login", data={"password": "wrong"}, follow_redirects=False)
+
+        response = authenticated_client.get("/home")
+
+        assert response.status_code == 200
+
+    def test_oversized_password_is_rejected_without_echoing_or_logging_it(self, client, caplog):
+        password = "oversized-test-password" * 100
+
+        response = client.post("/login", data={"password": password}, follow_redirects=False)
+
+        assert response.status_code == 401
+        assert password not in response.text and password not in caplog.text
+        assert not response.headers.get_list("set-cookie")
 
     def test_refresh_without_cookie_redirects_login(self, client):
         response = client.post("/refresh", follow_redirects=False)

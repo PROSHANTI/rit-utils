@@ -1,0 +1,16 @@
+.neon-icon {
+    display: block;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 2px #ff779b88) drop-shadow(0 0 10px #ff779b55);
+    transition: filter .2s ease;
+}
+.square:hover .neon-icon {
+    filter: drop-shadow(0 0 3px #ff779baa) drop-shadow(0 0 14px #ff779b77);
+}
+.inventory-heading .neon-icon, .inventory-title .neon-icon {
+    width: 36px;
+    height: 36px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .neon-icon { transition: none; }
+}

@@ -16,7 +16,6 @@ SENSITIVE_ENV_NAMES = (
     "EMAIL_PASS",
     "PASSWORD",
     "TOTP_SECRET",
-    "LOGIN",
     "SEND_FROM",
     "ADDR_TO",
     "BCC_TO",

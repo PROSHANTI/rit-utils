@@ -1,0 +1,34 @@
+.hover-shine {
+    position: relative;
+    overflow: hidden;
+}
+
+.hover-shine::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 50%;
+    pointer-events: none;
+    background: linear-gradient(110deg, transparent 15%, #ffb4ce14 48%, #ffe5ee1a 52%, transparent 85%);
+    transform: translate3d(-220%, 0, 0) skewX(-15deg);
+}
+
+.hover-shine:hover::after,
+.hover-shine:focus-visible::after {
+    animation: hover-shine .85s ease-out;
+}
+
+@keyframes hover-shine {
+    from { transform: translate3d(-220%, 0, 0) skewX(-15deg); }
+    to { transform: translate3d(320%, 0, 0) skewX(-15deg); }
+}
+
+html.page-paused .hover-shine::after {
+    animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hover-shine::after { display: none; }
+    .hover-shine { transition: none; }
+    .hover-shine:hover { transform: none; }
+}

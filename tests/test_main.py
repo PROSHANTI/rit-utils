@@ -48,6 +48,7 @@ class TestApplicationRoutes:
             ("/logout", "POST"),
             ("/refresh", "POST"),
             ("/home", "GET"),
+            ("/home/cat", "GET"),
             ("/send_email", "GET"),
             ("/send_email", "POST"),
             ("/gen_rit_cert", "GET"),
@@ -83,8 +84,8 @@ class TestApplicationRoutes:
             ("/inventory/pdf", "GET"),
         }
 
-        assert len(router_routes) == 38
-        assert len(application_routes) == 38
+        assert len(router_routes) == 39
+        assert len(application_routes) == 39
         assert {(route.path, method) for route in router_routes for method in route.methods} == expected_pairs
         assert {(route.path, method) for route in application_routes for method in route.methods} == expected_pairs
 
@@ -107,6 +108,7 @@ class TestApplicationRoutes:
             pytest.param("/refresh", "POST", 0, id="refresh-public"),
             pytest.param("/logout", "POST", 1, id="logout-protected"),
             pytest.param("/home", "GET", 1, id="home-protected"),
+            pytest.param("/home/cat", "GET", 1, id="cat-protected"),
             pytest.param("/send_email", "GET", 1, id="email-get-protected"),
             pytest.param("/send_email", "POST", 1, id="email-post-protected"),
             pytest.param("/gen_rit_cert", "GET", 1, id="certificate-get-protected"),

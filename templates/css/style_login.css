@@ -84,6 +84,15 @@ button:hover {
     box-shadow: 0 5px 15px rgba(255, 75, 43, 0.4);
 }
 
+button:disabled {
+    cursor: wait;
+    opacity: .55;
+    transform: none;
+    box-shadow: none;
+}
+
+button:disabled::after { display: none; }
+
 .logo {
     text-align: center;
     margin-bottom: 30px;

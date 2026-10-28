@@ -1,13 +1,18 @@
 import datetime
+import hmac
 import logging
+import math
 import os
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from threading import Lock
 
 from authx import AuthX, AuthXConfig
 from authx.exceptions import JWTDecodeError
 from dotenv import load_dotenv
-from fastapi import Form, Request
+from fastapi import Request
 from fastapi.params import Depends
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -20,37 +25,100 @@ load_dotenv()
 
 @dataclass(frozen=True, slots=True)
 class Credentials:
-    username: str | None = field(repr=False)
     password: str | None = field(repr=False)
 
-    def matches(self, username: str, password: str) -> bool:
-        return username == self.username and password == self.password
+    def matches(self, password: str) -> bool:
+        if not self.password or len(password) > 1024:
+            return False
+        return hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8"))
+
+
+@dataclass(frozen=True, slots=True)
+class LoginAttempt:
+    accepted: bool
+    remaining_attempts: int
+    retry_after: int = 0
+
+
+class LoginThrottle:
+    """Общий лимит для единственной учётной записи в одном процессе приложения."""
+
+    max_attempts = 10
+    cooldown_seconds = 5 * 60
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = Lock()
+        self._failures = 0
+        self._blocked_until = 0.0
+
+    def attempt(self, verify_password: Callable[[], bool]) -> LoginAttempt:
+        with self._lock:
+            now = self._clock()
+            retry_after = max(0, math.ceil(self._blocked_until - now))
+            if retry_after:
+                return LoginAttempt(False, 0, retry_after)
+
+            if self._blocked_until:
+                self._failures = 0
+                self._blocked_until = 0.0
+
+            if verify_password():
+                self._failures = 0
+                return LoginAttempt(True, self.max_attempts)
+
+            self._failures += 1
+            if self._failures >= self.max_attempts:
+                self._blocked_until = now + self.cooldown_seconds
+                return LoginAttempt(False, 0, self.cooldown_seconds)
+
+            return LoginAttempt(False, self.max_attempts - self._failures)
+
+    def retry_after(self) -> int:
+        with self._lock:
+            return max(0, math.ceil(self._blocked_until - self._clock()))
 
 
 class AuthenticationService:
-    def __init__(self, credentials: Credentials, security: AuthX, *, templates: Jinja2Templates | None = None) -> None:
+    def __init__(
+        self,
+        credentials: Credentials,
+        security: AuthX,
+        *,
+        templates: Jinja2Templates | None = None,
+        login_throttle: LoginThrottle | None = None,
+    ) -> None:
         self.credentials = credentials
         self.security = security
         self.config = security.config
         self.templates = templates or Jinja2Templates(directory="templates")
         self.cookies = CookiePolicy()
         self.revoked_tokens: set[str] = set()
+        self.login_throttle = login_throttle or LoginThrottle()
 
     @classmethod
     def from_env(cls) -> "AuthenticationService":
-        return cls(Credentials(os.getenv("LOGIN"), os.getenv("PASSWORD")), cls._create_security())
+        return cls(Credentials(os.getenv("PASSWORD")), cls._create_security())
 
     def dependency(self) -> Depends:
         logger.debug("Подготовка проверки токена доступа")
         return Depends(self.security.access_token_required)
 
-    def login(self, request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
+    def login(self, request: Request, password: str) -> Response:
         logger.info("Начата авторизация")
 
-        if not self.credentials.matches(username, password):
-            logger.warning("Авторизация отклонена: неверные учётные данные")
-            return self.templates.TemplateResponse(
-                request, "login.html", {"error": "Неверный логин или пароль"}, status_code=401
+        attempt = self.login_throttle.attempt(lambda: self.credentials.matches(password))
+        if not attempt.accepted:
+            logger.warning(
+                "Авторизация отклонена: осталось попыток %s, ожидание %s с",
+                attempt.remaining_attempts,
+                attempt.retry_after,
+            )
+            return self._login_page(
+                request,
+                error=f"Неверный пароль. Осталось попыток: {attempt.remaining_attempts}.",
+                retry_after=attempt.retry_after,
+                status_code=401,
             )
 
         response = RedirectResponse(url="/home", status_code=303)
@@ -123,7 +191,25 @@ class AuthenticationService:
         if request.cookies.get(self.config.JWT_ACCESS_COOKIE_NAME):
             return RedirectResponse(url="/home", status_code=303)
 
-        return self.templates.TemplateResponse(request, "login.html")
+        return self._login_page(request)
+
+    def _login_page(
+        self, request: Request, *, error: str | None = None, retry_after: int | None = None, status_code: int = 200
+    ) -> Response:
+        wait = self.login_throttle.retry_after() if retry_after is None else retry_after
+        headers = {"Cache-Control": "no-store"}
+        if wait:
+            error = "Слишком много неверных попыток. Повторить через"
+            status_code = 429
+            headers["Retry-After"] = str(wait)
+
+        return self.templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": error, "retry_after": wait, "retry_display": f"{wait // 60:02d}:{wait % 60:02d}"},
+            status_code=status_code,
+            headers=headers,
+        )
 
     def _clear_session(self, *, refresh: bool = True) -> RedirectResponse:
         response = RedirectResponse(url="/", status_code=303)

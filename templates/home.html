@@ -5,48 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/css/style_home.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style_home.css?v=home-neon-1">
+    <link rel="stylesheet" href="/static/css/hover_shine.css?v=shine-1">
+    <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
+    <script src="/static/home.js?v=home-neon-1" defer></script>
+    {% include "ambient_background_head.html" %}
 </head>
 <body>
+    {% include "ambient_background.html" %}
     <div class="header">
         <div class="logo">
-            <span>RIT-UTILS</span>
+            <h1 class="brand-wordmark" aria-label="RIT-UTILS">RIT-UT<span class="brand-heart-letter">I<button class="heart-trigger" id="love-trigger" type="button" aria-label="Для тебя, любимая" aria-controls="love-note" aria-expanded="false"><img class="neon-icon" src="/static/images/neon/heart.svg" width="18" height="18" alt=""></button></span>LS</h1>
         </div>
-        <p class="subtitle">Инструменты для автоматизации рабочих процессов</p>
+        <p class="subtitle">Инструменты для автоматизации рабочих процессов<button class="paw-trigger" id="cat-trigger" type="button" aria-label="Показать котика" aria-haspopup="dialog" aria-controls="cat-dialog"><img class="neon-icon" src="/static/images/neon/paw.svg" width="25" height="25" alt=""></button></p>
     </div>
 
+    <section class="love-note" id="love-note" role="dialog" aria-labelledby="love-title" hidden>
+        <button class="little-close" id="love-close" type="button" aria-label="Закрыть послание">×</button>
+        <p class="love-title" id="love-title">Для тебя, любимая</p>
+        <p class="love-message" id="love-message" aria-live="polite"></p>
+        <button class="little-button" id="love-next" type="button">Ещё одно</button>
+    </section>
+
+    <dialog class="cat-dialog" id="cat-dialog" aria-labelledby="cat-title">
+        <div class="cat-heading"><h2 id="cat-title">Минутка милоты</h2><button class="little-close" id="cat-close" type="button" aria-label="Закрыть котика">×</button></div>
+        <div class="cat-frame" id="cat-frame"><div class="cat-placeholder" id="cat-placeholder" aria-hidden="true"><img src="/static/images/neon/paw.svg" width="32" height="32" alt=""></div><img class="cat-photo" id="cat-photo" width="360" height="270" alt="Котик" hidden></div>
+        <div class="cat-actions"><button class="little-button" id="cat-next" type="button">Ещё котик</button></div>
+    </dialog>
+
     <div class="container">
-        <a href="/send_email" class="square">
-            <i class="fas fa-envelope"></i>
+        <a href="/send_email" class="square hover-shine">
+            <img src="/static/images/neon/mail.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             SEND EMAIL
             <p class="desc">Отправка отчета по электронной почте</p>
         </a>
 
-        <a href="/gen_rit_cert" class="square">
-            <i class="fas fa-certificate"></i>
+        <a href="/gen_rit_cert" class="square hover-shine">
+            <img src="/static/images/neon/certificate.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             GEN RIT CERT
             <p class="desc">Генерация подарочных сертификатов</p>
         </a>
 
-        <a href="/doctor_form" class="square">
-            <i class="fas fa-file-medical"></i>
+        <a href="/doctor_form" class="square hover-shine">
+            <img src="/static/images/neon/doctor-form.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             DOCTOR FORM
             <p class="desc">Создание карточек пациентов</p>
         </a>
 
-        <a href="/remove_bg" class="square">
-            <i class="fas fa-image"></i>
+        <a href="/remove_bg" class="square hover-shine">
+            <img src="/static/images/neon/remove-bg.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             REMOVE BG
             <p class="desc">Удаление фона с изображений</p>
         </a>
-        <a href="/one_alma" class="square">
-            <img src="/static/images/one_alma.svg" alt="Бутылочка крема" class="utility-icon">
+        <a href="/one_alma" class="square hover-shine">
+            <img src="/static/images/neon/one-alma.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             Учет OneAlma
             <p class="desc">Учет продажи товаров</p>
         </a>
-        <a href="/inventory" class="square">
-            <img src="/static/images/inventory.svg" alt="Коробка" class="utility-icon">
+        <a href="/inventory" class="square hover-shine">
+            <img src="/static/images/neon/inventory.svg" alt="" class="utility-icon neon-icon" width="72" height="72">
             Инвентаризация
             <p class="desc">Учёт остатков и сроков годности</p>
         </a>

@@ -15,7 +15,6 @@ if str(project_root) not in sys.path:
 os.environ.update(
     {
         "JWT_SECRET_KEY": "test_secret_key_for_jwt_tokens_12345",
-        "LOGIN": "test_admin",
         "PASSWORD": "test_password",
         "TOTP_SECRET": "TESTTOTP32CHARSSECRETFORTEST123456",
         "SEND_FROM": "test@example.com",
@@ -65,7 +64,7 @@ def authenticated_client(app):
     with TestClient(app, base_url="https://testserver") as test_client:
         response = test_client.post(
             "/login",
-            data={"username": "test_admin", "password": "test_password"},
+            data={"password": "test_password"},
             follow_redirects=False,
         )
         assert response.status_code == 303
@@ -143,11 +142,12 @@ def mock_file_upload():
 
 
 @pytest.fixture(autouse=True)
-def reset_revoked_tokens():
-    """Очистка отозванных токенов перед каждым тестом"""
-    from src.auth.login import auth_service
+def reset_auth_state(monkeypatch):
+    """Каждый тест получает отдельный лимит входа и список отозванных токенов."""
+    from src.auth.login import LoginThrottle, auth_service
 
     auth_service.revoked_tokens.clear()
+    monkeypatch.setattr(auth_service, "login_throttle", LoginThrottle())
     yield
     auth_service.revoked_tokens.clear()
 

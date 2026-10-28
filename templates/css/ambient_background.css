@@ -1,0 +1,151 @@
+body { position: relative; isolation: isolate; }
+.ambient-background { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.ambient-wash {
+    position: absolute;
+    inset: -5%;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 22% 28%, #b51b4d33, transparent 56%), radial-gradient(ellipse at 80% 72%, #be375c26, transparent 54%);
+    animation: ambient-drift 30s ease-in-out infinite alternate;
+}
+@keyframes ambient-drift {
+    from { transform: translate3d(-1.5%, -1%, 0) scale(1.02); opacity: .42; }
+    to { transform: translate3d(1.5%, 1%, 0) scale(1.06); opacity: .72; }
+}
+html.page-paused .ambient-wash { animation-play-state: paused; }
+.ambient-particles {
+    --dust: #ffe7dc66;
+    --dust-bright: #ffe6cdcc;
+    --dust-pink: #ffadc96b;
+    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+}
+.dust-layer { position: absolute; inset: -6%; background-repeat: no-repeat; }
+.dust-far {
+    background-image:
+        radial-gradient(circle at 89.7% 54.9%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 57.0% 11.8%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 25.8% 49.9%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 77.0% 8.6%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 58.1% 26.2%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 73.3% 73.1%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 57.1% 8.1%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 42.2% 65.5%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 26.0% 15.2%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 77.3% 65.3%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 49.0% 63.0%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 37.1% 21.1%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 73.2% 41.1%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 75.9% 49.4%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 32.5% 61.2%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 65.9% 74.5%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 35.9% 36.2%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 71.0% 13.8%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 83.8% 87.9%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 61.6% 83.0%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 74.0% 75.7%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 52.1% 19.3%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 9.1% 17.2%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 68.9% 43.3%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 80.6% 55.3%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 69.8% 40.0%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 77.9% 87.5%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 37.5% 89.2%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 9.0% 74.6%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 69.9% 46.0%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 57.6% 74.5%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 17.2% 13.4%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 84.7% 40.0%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 60.8% 67.3%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 31.5% 45.7%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 19.1% 54.6%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 26.1% 17.1%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 34.6% 84.8%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 8.4% 91.3%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 33.0% 20.8%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 30.6% 68.0%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 75.7% 52.6%, var(--dust-pink) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 16.1% 30.0%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 80.9% 18.8%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 76.7% 81.2%, var(--dust-pink) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 53.5% 81.6%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 27.3% 23.4%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 63.7% 90.9%, var(--dust-pink) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 51.7% 46.9%, var(--dust) 0.6px, transparent 1.6px),
+        radial-gradient(circle at 61.7% 9.2%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 67.5% 45.7%, var(--dust-pink) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 45.4% 46.8%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 83.1% 79.6%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 50.4% 65.6%, var(--dust-pink) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 12.0% 85.3%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 73.5% 83.6%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 9.7% 86.8%, var(--dust-pink) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 36.4% 48.2%, var(--dust) 0.7px, transparent 1.6px),
+        radial-gradient(circle at 81.4% 33.2%, var(--dust) 0.8px, transparent 1.6px),
+        radial-gradient(circle at 15.0% 89.4%, var(--dust-pink) 0.6px, transparent 1.6px);
+    animation: dust-drift-far 30s ease-in-out -9s infinite alternate;
+}
+.dust-middle {
+    background-image:
+        radial-gradient(circle at 18.7% 81.4%, var(--dust-bright) 0.9px, transparent 2.5px),
+        radial-gradient(circle at 32.0% 56.5%, var(--dust) 0.8px, transparent 2.0px),
+        radial-gradient(circle at 38.4% 75.5%, var(--dust-pink) 0.8px, transparent 2.8px),
+        radial-gradient(circle at 32.4% 35.9%, var(--dust-bright) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 16.0% 47.1%, var(--dust) 0.9px, transparent 2.8px),
+        radial-gradient(circle at 63.8% 68.9%, var(--dust-pink) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 51.1% 12.9%, var(--dust-bright) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 21.7% 37.2%, var(--dust) 0.9px, transparent 2.8px),
+        radial-gradient(circle at 72.5% 36.6%, var(--dust-pink) 0.9px, transparent 2.5px),
+        radial-gradient(circle at 18.9% 53.0%, var(--dust-bright) 1.0px, transparent 2.5px),
+        radial-gradient(circle at 11.5% 32.8%, var(--dust) 0.9px, transparent 2.8px),
+        radial-gradient(circle at 70.1% 20.5%, var(--dust-pink) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 54.4% 90.2%, var(--dust-bright) 0.8px, transparent 2.5px),
+        radial-gradient(circle at 20.9% 23.5%, var(--dust) 0.9px, transparent 2.5px),
+        radial-gradient(circle at 76.7% 74.4%, var(--dust-pink) 0.8px, transparent 2.8px),
+        radial-gradient(circle at 72.8% 85.3%, var(--dust-bright) 1.0px, transparent 2.5px),
+        radial-gradient(circle at 69.8% 64.3%, var(--dust) 0.8px, transparent 2.5px),
+        radial-gradient(circle at 17.3% 67.7%, var(--dust-pink) 1.0px, transparent 2.5px),
+        radial-gradient(circle at 81.6% 13.0%, var(--dust-bright) 0.9px, transparent 2.0px),
+        radial-gradient(circle at 31.7% 60.9%, var(--dust) 0.9px, transparent 2.5px),
+        radial-gradient(circle at 74.9% 64.3%, var(--dust-pink) 0.9px, transparent 2.0px),
+        radial-gradient(circle at 71.2% 69.8%, var(--dust-bright) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 68.4% 39.3%, var(--dust) 0.9px, transparent 2.5px),
+        radial-gradient(circle at 18.3% 40.7%, var(--dust-pink) 1.0px, transparent 2.5px),
+        radial-gradient(circle at 88.9% 81.9%, var(--dust-bright) 1.0px, transparent 2.8px),
+        radial-gradient(circle at 59.4% 31.6%, var(--dust) 0.8px, transparent 2.5px),
+        radial-gradient(circle at 26.7% 76.9%, var(--dust-pink) 0.9px, transparent 2.8px),
+        radial-gradient(circle at 18.3% 78.0%, var(--dust-bright) 1.0px, transparent 2.5px);
+    animation: dust-drift-middle 24s ease-in-out -12s infinite alternate;
+}
+.dust-near {
+    background-image:
+        radial-gradient(circle at 22.6% 14.8%, #ffe1bc80 0.9px, #ffe1bc26 2.5px, transparent 5px),
+        radial-gradient(circle at 39.6% 21.5%, #ffb1cc66 0.9px, #ffb1cc22 2.5px, transparent 5px),
+        radial-gradient(circle at 50.3% 52.3%, #ffd4bb66 1.0px, #ffd4bb22 2.5px, transparent 5px),
+        radial-gradient(circle at 18.6% 31.2%, #ffe1bc80 0.9px, #ffe1bc26 2.5px, transparent 5px),
+        radial-gradient(circle at 27.5% 47.8%, #ffb1cc66 1.0px, #ffb1cc22 2.5px, transparent 5px),
+        radial-gradient(circle at 23.7% 69.5%, #ffd4bb66 0.9px, #ffd4bb22 2.5px, transparent 5px),
+        radial-gradient(circle at 37.8% 8.3%, #ffe1bc80 1.0px, #ffe1bc26 2.5px, transparent 5px),
+        radial-gradient(circle at 20.6% 13.5%, #ffb1cc66 0.7px, #ffb1cc22 2.5px, transparent 5px),
+        radial-gradient(circle at 78.3% 46.1%, #ffd4bb66 0.9px, #ffd4bb22 2.5px, transparent 5px),
+        radial-gradient(circle at 76.5% 43.1%, #ffe1bc80 0.9px, #ffe1bc26 2.5px, transparent 5px),
+        radial-gradient(circle at 85.4% 89.1%, #ffb1cc66 0.7px, #ffb1cc22 2.5px, transparent 5px),
+        radial-gradient(circle at 17.7% 9.9%, #ffd4bb66 1.0px, #ffd4bb22 2.5px, transparent 5px);
+    animation: dust-drift-near 18s ease-in-out -6s infinite alternate;
+}
+@keyframes dust-drift-far {
+    from { transform: translate3d(-8px, 12px, 0); opacity: .55; }
+    to { transform: translate3d(10px, -12px, 0); opacity: .8; }
+}
+@keyframes dust-drift-middle {
+    from { transform: translate3d(10px, 18px, 0); opacity: .65; }
+    to { transform: translate3d(-14px, -20px, 0); opacity: .9; }
+}
+@keyframes dust-drift-near {
+    from { transform: translate3d(-12px, 24px, 0); opacity: .45; }
+    to { transform: translate3d(20px, -28px, 0); opacity: .75; }
+}
+html.page-paused .dust-layer { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) {
+    .ambient-wash { animation: none; opacity: .5; transform: none; }
+    .dust-layer { animation: none; }
+}
