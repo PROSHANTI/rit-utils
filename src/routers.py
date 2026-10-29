@@ -1,6 +1,6 @@
 import base64
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -42,9 +42,9 @@ class ApplicationRouter:
         logger.debug("Обработка запроса выхода из системы")
         return self.auth.logout(request)
 
-    def refresh_token(self, request: Request) -> Response:
+    async def refresh_token(self, request: Request) -> Response:
         logger.debug("Обработка запроса обновления токена")
-        return self.auth.refresh(request)
+        return await self.auth.refresh(request)
 
     def root(self, request: Request) -> Response:
         logger.debug("Обработка запроса главной страницы")
@@ -239,7 +239,7 @@ class ApplicationRouter:
 
     def _register_routes(self) -> None:
         self.router.include_router(self.inventory.router, dependencies=self.dependencies)
-        routes: list[tuple[str, Callable[..., Response], list[str], bool, str, list[str]]] = [
+        routes: list[tuple[str, Callable[..., Response | Awaitable[Response]], list[str], bool, str, list[str]]] = [
             ("/login", self.login, ["POST"], False, "Авторизация", ["Авторизация"]),
             ("/logout", self.logout, ["POST"], True, "Выйти из системы", ["Выход из системы"]),
             ("/refresh", self.refresh_token, ["POST"], False, "Обновить токен доступа", ["Авторизация"]),

@@ -53,8 +53,7 @@
             response = await fetch(url, settings);
         }
         if (response.status === 401 || response.redirected) {
-            window.location.href = '/';
-            throw new Error('Войдите в систему и повторите действие.');
+            throw new Error('Сессия завершена. Войдите снова. Введённые данные оставлены в форме.');
         }
         if (!response.headers.get('content-type')?.includes('application/json')) {
             throw new Error('Сервер не смог выполнить действие. Попробуйте позже.');

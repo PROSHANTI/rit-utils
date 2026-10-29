@@ -3,9 +3,10 @@ Tests for login.py authentication module
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from authx.exceptions import JWTDecodeError
 from fastapi.responses import RedirectResponse
 
 from src.auth.login import AuthenticationService, Credentials, LoginThrottle, auth_service
@@ -190,33 +191,34 @@ class TestLogoutHandler:
         assert result.status_code == 303
 
 
+@pytest.mark.asyncio
 class TestRefreshTokenHandler:
     """Tests for token refresh handler"""
 
-    def test_refresh_token_missing(self, mock_request):
+    async def test_refresh_token_missing(self, mock_request):
         """Test token refresh without token"""
         mock_request.cookies = {}
 
-        result = auth_service.refresh(mock_request)
+        result = await auth_service.refresh(mock_request)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/"
         assert result.status_code == 303
 
-    def test_refresh_token_revoked(self, mock_request):
+    async def test_refresh_token_revoked(self, mock_request):
         """Test refresh of revoked token"""
         test_token = "revoked_token"
         auth_service.revoked_tokens.add(test_token)
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
 
-        result = auth_service.refresh(mock_request)
+        result = await auth_service.refresh(mock_request)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/"
         assert result.status_code == 303
 
     @patch.object(auth_service, "security")
-    def test_refresh_token_success(self, mock_security, mock_request):
+    async def test_refresh_token_success(self, mock_security, mock_request):
         """Test successful token refresh"""
         test_token = "valid_refresh_token"
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
@@ -224,10 +226,11 @@ class TestRefreshTokenHandler:
         mock_payload = MagicMock()
         mock_payload.sub = "1"
         mock_payload.jti = "test_jti"
-        mock_security._decode_token.return_value = mock_payload
+        mock_payload.exp = 2000000000
+        mock_security.refresh_token_required = AsyncMock(return_value=mock_payload)
         mock_security.create_access_token.return_value = "new_access_token"
 
-        result = auth_service.refresh(mock_request)
+        result = await auth_service.refresh(mock_request)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/home"
@@ -235,14 +238,14 @@ class TestRefreshTokenHandler:
         mock_security.create_access_token.assert_called_once()
 
     @patch.object(auth_service, "security")
-    def test_refresh_token_invalid(self, mock_security, mock_request):
+    async def test_refresh_token_invalid(self, mock_security, mock_request):
         """Test refresh of invalid token"""
         test_token = "invalid_token"
         mock_request.cookies = {"JWT_REFRESH_TOKEN_COOKIE": test_token}
 
-        mock_security._decode_token.side_effect = Exception("Invalid token")
+        mock_security.refresh_token_required = AsyncMock(side_effect=JWTDecodeError("Invalid token"))
 
-        result = auth_service.refresh(mock_request)
+        result = await auth_service.refresh(mock_request)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers["location"] == "/"

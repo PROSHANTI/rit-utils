@@ -51,7 +51,7 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
       run: |
         uv run --locked pytest
-        node --test tests/js/home.test.cjs
+        node --test tests/js/*.test.cjs
 
   build_and_push_to_docker_hub:
     name: Build and push Docker image to DockerHub

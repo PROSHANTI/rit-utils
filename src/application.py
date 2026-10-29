@@ -17,6 +17,7 @@ class WebApplication:
         self.routes = ApplicationRouter(auth)
         self.app = FastAPI(docs_url=None, redoc_url=None)
         self.app.mount("/static", StaticFiles(directory="templates"), name="static")
+        self.app.middleware("http")(auth.persist_session)
         self.app.add_exception_handler(JWTDecodeError, auth.handle_jwt_error)
         self.app.add_exception_handler(MissingTokenError, auth.handle_jwt_error)
         self.app.include_router(self.routes.router)

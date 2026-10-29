@@ -68,7 +68,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run --locked pytest
-          node --test tests/js/home.test.cjs
+          node --test tests/js/*.test.cjs
           uv run --locked python deploy/pi/test_updater.py
           uv run --locked python .github/scripts/test_notify_pi.py
 

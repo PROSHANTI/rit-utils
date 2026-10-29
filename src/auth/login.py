@@ -5,12 +5,13 @@ import math
 import os
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from threading import Lock
 
 from authx import AuthX, AuthXConfig
-from authx.exceptions import JWTDecodeError
+from authx.exceptions import AuthXException, JWTDecodeError, MissingTokenError
+from authx.schema import TokenPayload
 from dotenv import load_dotenv
 from fastapi import Request
 from fastapi.params import Depends
@@ -102,7 +103,43 @@ class AuthenticationService:
 
     def dependency(self) -> Depends:
         logger.debug("Подготовка проверки токена доступа")
-        return Depends(self.security.access_token_required)
+        return Depends(self.require_session)
+
+    async def require_session(self, request: Request) -> None:
+        try:
+            await self.security.access_token_required(request)
+            return
+        except MissingTokenError:
+            pass
+        except AuthXException as exc:
+            if not isinstance(exc, JWTDecodeError) or "expired" not in str(exc).lower():
+                raise JWTDecodeError("Invalid access token") from exc
+
+        payload = await self._refresh_payload(request)
+        request.state.renewed_access_token = self.security.create_access_token(uid=payload.sub, jti=str(uuid.uuid4()))
+
+    async def persist_session(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        response = await call_next(request)
+        token = getattr(request.state, "renewed_access_token", None)
+        if token and request.url.path != "/logout":
+            self.cookies.set(response, self.config.JWT_ACCESS_COOKIE_NAME, token)
+            response.headers["Cache-Control"] = "no-store"
+            logger.info("Сессия автоматически продлена при обработке запроса")
+        return response
+
+    async def _refresh_payload(self, request: Request) -> TokenPayload:
+        token = request.cookies.get(self.config.JWT_REFRESH_COOKIE_NAME)
+        if not token:
+            raise MissingTokenError("Refresh token missing")
+        if token in self.revoked_tokens:
+            raise JWTDecodeError("Refresh token revoked")
+        try:
+            payload = await self.security.refresh_token_required(request)
+        except AuthXException as exc:
+            raise JWTDecodeError("Invalid refresh token") from exc
+        if payload.sub != "1" or not payload.jti or payload.exp is None:
+            raise JWTDecodeError("Invalid refresh session")
+        return payload
 
     def login(self, request: Request, password: str) -> Response:
         logger.info("Начата авторизация")
@@ -143,47 +180,28 @@ class AuthenticationService:
         logger.info("Выход из системы выполнен")
         return response
 
-    def refresh(self, request: Request) -> RedirectResponse:
+    async def refresh(self, request: Request) -> Response:
         logger.info("Начато обновление токена доступа")
-        refresh_token = request.cookies.get(self.config.JWT_REFRESH_COOKIE_NAME)
-
-        if not refresh_token:
-            logger.warning("Обновление токена отклонено: токен обновления отсутствует")
-            return RedirectResponse(url="/", status_code=303)
-
-        if refresh_token in self.revoked_tokens:
-            logger.warning("Обновление токена отклонено: токен обновления отозван")
-            return self._clear_session()
-
         try:
-            payload = self.security._decode_token(refresh_token)
-
-            if not hasattr(payload, "jti"):
-                raise ValueError("Invalid token format")
-
+            payload = await self._refresh_payload(request)
             new_access_token = self.security.create_access_token(uid=payload.sub, jti=f"{uuid.uuid4()}")
-            response = RedirectResponse(url="/home", status_code=303)
-            response.set_cookie(
-                key=self.config.JWT_ACCESS_COOKIE_NAME, value=new_access_token, httponly=True, secure=True, samesite="strict"
+            response = (
+                JSONResponse({"detail": "Сессия продлена."})
+                if self._wants_json(request)
+                else RedirectResponse(url="/home", status_code=303)
             )
+            self.cookies.set(response, self.config.JWT_ACCESS_COOKIE_NAME, new_access_token)
+            response.headers["Cache-Control"] = "no-store"
             logger.info("Токен доступа обновлён")
             return response
-
-        except Exception:
+        except (JWTDecodeError, MissingTokenError):
             logger.warning("Обновление токена отклонено: не удалось проверить токен")
-            return self._clear_session()
+            return self._clear_session(request)
 
     async def handle_jwt_error(self, request: Request, exc: Exception) -> Response:
         logger.warning("Запрос отклонён: ошибка проверки JWT")
 
-        if isinstance(exc, JWTDecodeError) and "expired" in f"{exc}".lower():
-
-            if request.headers.get("accept") == "application/json":
-                return JSONResponse(status_code=401, content={"detail": "Token expired"})
-
-            return self._clear_session(refresh=False)
-
-        return self._clear_session()
+        return self._clear_session(request)
 
     def check_status(self, request: Request) -> Response:
         logger.debug("Проверка наличия авторизации")
@@ -211,13 +229,19 @@ class AuthenticationService:
             headers=headers,
         )
 
-    def _clear_session(self, *, refresh: bool = True) -> RedirectResponse:
-        response = RedirectResponse(url="/", status_code=303)
-        response.delete_cookie(self.config.JWT_ACCESS_COOKIE_NAME, secure=True, samesite="strict")
+    @staticmethod
+    def _wants_json(request: Request) -> bool:
+        return "application/json" in request.headers.get("accept", "").lower()
 
-        if refresh:
-            response.delete_cookie(self.config.JWT_REFRESH_COOKIE_NAME, secure=True, samesite="strict")
-
+    def _clear_session(self, request: Request) -> Response:
+        response = (
+            JSONResponse(status_code=401, content={"detail": "Сессия завершена. Войдите снова."})
+            if self._wants_json(request)
+            else RedirectResponse(url="/", status_code=303)
+        )
+        self.cookies.delete(response, self.config.JWT_ACCESS_COOKIE_NAME)
+        self.cookies.delete(response, self.config.JWT_REFRESH_COOKIE_NAME)
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @staticmethod

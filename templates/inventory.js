@@ -91,16 +91,24 @@ class InventoryPage {
     }
 
     async request(url, method = "GET", body = null) {
-        const headers = {"X-CSRF-Token": this.csrf};
+        const headers = {"X-CSRF-Token": this.csrf, "Accept": "application/json"};
         if (body && !(body instanceof FormData)) {
             headers["Content-Type"] = "application/json";
             body = JSON.stringify(body);
         }
         const response = await fetch(url, {method, headers, body, credentials: "same-origin", cache: "no-store"});
-        const result = await response.json().catch(() => ({}));
+        if (response.status === 401 || response.redirected) {
+            throw new Error("Сессия завершена. Войдите снова. Введённые данные оставлены в форме.");
+        }
+        if (!response.headers.get("content-type")?.includes("application/json")) {
+            throw new Error("Сервер не подтвердил сохранение. Повторите действие.");
+        }
+        let result;
+        try { result = await response.json(); }
+        catch { throw new Error("Сервер не подтвердил сохранение. Повторите действие."); }
         if (!response.ok) {
             const detail = typeof result.detail === "string" ? result.detail : "Проверьте поля: артикул до 64 цифр, тексты до 255 символов, целое количество и срок ММ.ГГГГ.";
-            throw new Error(response.status === 401 ? "Сессия завершена. Войдите снова и обновите страницу." : detail);
+            throw new Error(detail);
         }
         return result;
     }
