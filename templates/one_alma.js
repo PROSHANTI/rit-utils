@@ -174,8 +174,6 @@
         document.getElementById('total-count').textContent = data.total;
         document.getElementById('sold-count').textContent = data.sold;
         document.getElementById('available-count').textContent = data.available;
-        document.getElementById('showcase-count').textContent = data.showcase_quantity;
-        document.getElementById('showcase-products').textContent = data.showcased_products;
         document.getElementById('sales-amount').textContent = `${data.sales_amount} ₽`;
         document.getElementById('sales-unpriced').textContent = data.sales_unpriced ? ` · без цены: ${data.sales_unpriced} шт.` : '';
         data.valuations.forEach((valuation, index) => {

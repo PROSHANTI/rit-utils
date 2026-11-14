@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
     <script src="/static/one_alma_expiry.js?v=import-ui-1" defer></script>
-    <script src="/static/one_alma.js?v=session-renewal-1" defer></script>
+    <script src="/static/one_alma.js?v=showcase-summary-removed-1" defer></script>
     {% include "ambient_background_head.html" %}
 </head>
 <body class="inventory-page">
@@ -54,9 +54,6 @@
             <button type="button" id="import-products">Импорт товаров</button>
         </div>
         <section class="inventory-panel" aria-label="Товары">
-            <div class="table-toolbar">
-                <span class="showcase-summary">На витрине: <span id="showcase-count">{{ inventory.showcase_quantity }}</span> шт. · позиций: <span id="showcase-products">{{ inventory.showcased_products }}</span></span>
-            </div>
             <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
             <p class="expiry-legend"><span>Красный — срок истёк</span><span>Жёлтый — осталось до двух месяцев</span></p>
             <div class="inventory-scroll" tabindex="0" aria-label="Таблица товаров, прокручивается горизонтально">
