@@ -85,6 +85,14 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert 'data-sort-column="10">Списан' in html
     assert "10 000 UZS = 59,7137 ₽" in html
     assert "Цена по ЦБ РФ на 27.05, ₽" not in html
+    assert 'id="product-search-field" class="product-search-field" hidden' in html
+    assert 'id="product-search" aria-label="Поиск по таблице"' in html
+    assert 'id="toggle-product-search"' in html and 'aria-controls="product-search-field"' in html
+    assert html.index('id="product-search-field"') < html.index('id="toggle-product-search"')
+    assert html.index("Серый: есть списание") < html.index('id="toggle-product-search"')
+    assert html.index("/static/one_alma_search.js") < html.index("/static/one_alma.js")
+    assert 'id="product-search-empty"' in html and "Показывать позиций" not in html
+    assert 'id="only-active-products" checked' in html
 
 
 @pytest.mark.parametrize("indices, available", [([1], 1), ([1, 0], 0)])

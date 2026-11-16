@@ -6,12 +6,13 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=writeoffs-1">
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=table-search-1">
     <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
     <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
-    <script src="/static/one_alma_expiry.js?v=import-ui-1" defer></script>
-    <script src="/static/one_alma.js?v=writeoffs-1" defer></script>
+    <script src="/static/one_alma_expiry.js?v=table-search-1" defer></script>
+    <script src="/static/one_alma_search.js?v=table-search-1" defer></script>
+    <script src="/static/one_alma.js?v=table-search-1" defer></script>
     {% include "ambient_background_head.html" %}
 </head>
 <body class="inventory-page">
@@ -57,7 +58,17 @@
         </div>
         <section class="inventory-panel" aria-label="Товары">
             <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
-            <p class="expiry-legend"><span>Красный: срок истёк</span><span>Жёлтый: осталось до двух месяцев</span><span class="written-off-legend">Серый: есть списание</span></p>
+            <div class="expiry-legend">
+                <div class="expiry-legend-items"><span>Красный: срок истёк</span><span>Жёлтый: осталось до двух месяцев</span><span class="written-off-legend">Серый: есть списание</span></div>
+                <label class="only-active-filter"><input type="checkbox" id="only-active-products" checked>Только активные</label>
+                <div class="product-search">
+                    <div id="product-search-field" class="product-search-field" hidden>
+                        <input type="search" id="product-search" aria-label="Поиск по таблице" placeholder="Поиск по таблице" autocomplete="off">
+                        <button type="button" id="clear-product-search" aria-label="Очистить поиск" hidden>×</button>
+                    </div>
+                    <button type="button" id="toggle-product-search" class="search-toggle" aria-label="Поиск товаров" aria-expanded="false" aria-controls="product-search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
+                </div>
+            </div>
             <div class="inventory-scroll" tabindex="0" aria-label="Таблица товаров, прокручивается горизонтально">
                 <table class="inventory-table"><colgroup><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
                     <caption class="visually-hidden">Товары OneAlma: цены указаны за одну штуку</caption>
@@ -90,6 +101,7 @@
                     </tbody>
                 </table>
             </div>
+            <p id="product-search-empty" class="product-search-empty" role="status" aria-live="polite" hidden>Ничего не найдено</p>
             <p class="inventory-note">Цены за 1 штуку в рублях. Цена TheOneAlma пересчитана из узбекских сумов (UZS) по курсу ЦБ РФ на 27.05.2026: 10 000 UZS = 59,7137 ₽. Данные: прайс Emansi.</p>
         </section>
         <dialog id="count-editor" class="inventory-dialog showcase-dialog" aria-labelledby="count-editor-title">

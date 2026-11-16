@@ -48,6 +48,7 @@
                 if (day === lastDay) return;
                 lastDay = day;
                 refresh(document.querySelectorAll('.inventory-table tbody tr'));
+                document.dispatchEvent(new Event('onealma:expiry-updated'));
             };
             update();
             setInterval(update, 60000);

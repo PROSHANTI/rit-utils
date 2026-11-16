@@ -187,6 +187,30 @@ button:disabled { opacity: .5; cursor: default; }
 .inventory-table tr.has-writeoff > td:first-child { box-shadow: inset 3px 0 #9697a2; }
 .inventory-table tr.has-writeoff .expiry-cell { color: #b9b9c2; }
 .expiry-legend .written-off-legend:before { background: #9697a2; }
+
+.expiry-legend { align-items: center; gap: 12px; }
+.expiry-legend-items { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 16px; }
+.only-active-filter { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 0 8px; color: #dac4cf; font-size: 12px; font-weight: 400; white-space: nowrap; cursor: pointer; }
+.only-active-filter input { width: 15px; height: 15px; margin: 0; accent-color: #ec759c; cursor: pointer; }
+.only-active-filter:focus-within { outline: 2px solid #ff96b7; outline-offset: 5px; border-radius: 3px; }
+.product-search { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.product-search-field { display: flex; align-items: center; position: relative; width: min(280px, 40vw); }
+.product-search-field[hidden], .product-search button[hidden], .product-search-empty[hidden], .inventory-table tbody tr[hidden] { display: none; }
+.product-search input { font: inherit; width: 100%; height: 36px; min-height: 36px; margin: 0; padding: 8px 32px 8px 12px; border: 1px solid #73505e; border-radius: 8px; background: #1c1418; color: #f7e9f0; font-size: 13px; }
+.product-search input::placeholder { color: #ad919f; }
+.product-search input::-webkit-search-cancel-button { display: none; }
+.product-search .search-toggle { display: flex; align-items: center; justify-content: center; width: 36px; min-width: 36px; height: 36px; margin: 0; padding: 8px; background: transparent; border: 1px solid transparent; border-radius: 8px; color: #d9b8c8; }
+.search-toggle svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.product-search .search-toggle[aria-expanded="true"] { color: #ffb1cf; border-color: #73505e; background: #35242d; }
+.product-search .search-toggle:hover, .product-search #clear-product-search:hover { transform: none; box-shadow: none; background: #49303e; }
+.product-search #clear-product-search { position: absolute; right: 2px; top: 2px; width: 30px; height: 32px; margin: 0; padding: 0; border: 0; background: transparent; color: #cbb0bd; font-size: 22px; font-weight: 400; }
+.product-search button:focus-visible, .product-search input:focus-visible { outline: 2px solid #ff96b7; outline-offset: 3px; }
+.product-search-empty { margin: 0; padding: 32px 20px; text-align: center; color: #c6aebb; font-size: .9rem; }
+@media (max-width: 720px) {
+    .only-active-filter { margin-left: 0; }
+    .product-search:has(.product-search-field:not([hidden])) { width: 100%; justify-content: flex-end; }
+    .product-search-field { width: min(320px, calc(100vw - 112px)); }
+}
 .writeoff-comment { margin-top: 22px; }
 .writeoff-comment textarea { width: 100%; resize: vertical; min-height: 96px; padding: 12px; border: 1px solid #795267; border-radius: 8px; background: #181116; color: #fff; font: inherit; line-height: 1.5; }
 .writeoff-comment small { display: block; margin-top: 5px; text-align: right; color: #b8a6b1; font-size: 12px; }

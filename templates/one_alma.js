@@ -3,6 +3,16 @@
     const status = document.getElementById('save-status');
     const download = container.querySelector('.download-pdf');
     const tableBody = container.querySelector('.inventory-table tbody');
+    const productSearch = new window.OneAlmaSearch.TableSearch({
+        body: tableBody,
+        toggle: document.getElementById('toggle-product-search'),
+        field: document.getElementById('product-search-field'),
+        input: document.getElementById('product-search'),
+        clear: document.getElementById('clear-product-search'),
+        empty: document.getElementById('product-search-empty'),
+        active: document.getElementById('only-active-products'),
+        events: document,
+    });
     const productDialog = document.getElementById('product-dialog');
     const productForm = document.getElementById('product-form');
     const importDialog = document.getElementById('import-dialog');
@@ -124,6 +134,7 @@
             button.querySelector('span').textContent = active ? descending ? '↓' : '↑' : '↕';
         });
         download.href = `/one_alma/pdf?sort=${sortColumn}&descending=${descending}`;
+        productSearch.apply();
     }
 
     container.querySelectorAll('[data-sort-column]').forEach(button => {
