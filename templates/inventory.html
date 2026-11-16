@@ -6,11 +6,11 @@
     <title>Инвентаризация — RIT-UTILS</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/inventory.css?v=import-ui-1">
+    <link rel="stylesheet" href="/static/css/inventory.css?v=table-search-1">
     <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
     <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
-    <script src="/static/inventory.js?v=session-renewal-1" defer></script>
+    <script src="/static/inventory.js?v=table-search-1" defer></script>
     {% include "ambient_background_head.html" %}
 </head>
 <body class="clinic-inventory-page">
@@ -28,6 +28,15 @@
         <button class="action-button" id="show-history" type="button">История</button>
     </nav>
     <section class="inventory-panel" aria-label="Товары">
+        <div class="inventory-search-tools">
+            <div class="product-search">
+                <div id="product-search-field" class="product-search-field" hidden>
+                    <input type="search" id="product-search" aria-label="Поиск по таблице" placeholder="Поиск по таблице" autocomplete="off">
+                    <button type="button" id="clear-product-search" aria-label="Очистить поиск" hidden>×</button>
+                </div>
+                <button type="button" id="toggle-product-search" class="search-toggle" aria-label="Поиск товаров" aria-expanded="false" aria-controls="product-search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
+            </div>
+        </div>
         <div class="table-scroll" tabindex="0" aria-label="Таблица товаров">
             <table class="stock-table">
                 <colgroup><col><col><col><col><col><col><col><col><col></colgroup>

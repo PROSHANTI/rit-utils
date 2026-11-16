@@ -339,6 +339,23 @@ def test_page_actions_editing_history_and_pdf_end_to_end(authenticated_client, s
     assert client.put(f"/inventory/products/{item_id}", json=item().model_dump(), headers=headers).status_code == 404
 
 
+def test_page_has_search_without_activity_filter_or_pagination(authenticated_client, store):
+    before = store.items()
+
+    response = authenticated_client.get("/inventory")
+
+    html = response.text
+    assert response.status_code == 200
+    assert 'id="product-search-field" class="product-search-field" hidden' in html
+    assert 'id="product-search" aria-label="Поиск по таблице"' in html
+    assert 'aria-controls="product-search-field"' in html
+    assert html.index('id="product-search-field"') < html.index('id="toggle-product-search"')
+    assert 'id="clear-product-search"' in html
+    assert "Только активные" not in html and "only-active" not in html and "pagination" not in html
+    assert "inventory.js?v=table-search-1" in html and "inventory.css?v=table-search-1" in html
+    assert store.items() == before
+
+
 def test_import_preview_endpoint_does_not_write_and_commit_upserts(authenticated_client, store, headers):
     content = workbook(["0001", "Крем", "шт.", 7, 9])
     upload = {"file": ("stock.xlsx", content)}

@@ -1,5 +1,16 @@
 "use strict";
 
+function matchesInventoryItem(item, query) {
+    const normalize = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase('ru-RU')
+        .replace(/ё/g, 'е').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
+    const words = normalize(query).split(' ').filter(Boolean);
+    if (!words.length) return true;
+    const values = [item.id, item.article, item.brand, item.name, item.purchase_price, item.sale_price, item.expiry, item.quantity];
+    const prices = [item.purchase_price, item.sale_price].map(value => normalize(value).replace(/\s/g, ''));
+    const text = normalize([...values.map(value => value === '' || value === null || value === undefined ? '—' : value), ...prices].join(' '));
+    return words.every(word => text.includes(word));
+}
+
 class InventoryPage {
     constructor(root) {
         this.root = root;
@@ -27,7 +38,40 @@ class InventoryPage {
         return node;
     }
 
+    bindSearch() {
+        const search = document.getElementById('product-search');
+        const field = document.getElementById('product-search-field');
+        const toggle = document.getElementById('toggle-product-search');
+        const clear = document.getElementById('clear-product-search');
+        const closeSearch = () => {
+            field.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            search.value = '';
+            this.renderProducts();
+        };
+        toggle.addEventListener('click', () => {
+            if (field.hidden) {
+                field.hidden = false;
+                toggle.setAttribute('aria-expanded', 'true');
+                search.focus();
+            } else closeSearch();
+        });
+        search.addEventListener('input', () => this.renderProducts());
+        search.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            closeSearch();
+            toggle.focus();
+        });
+        clear.addEventListener('click', () => {
+            search.value = '';
+            this.renderProducts();
+            search.focus();
+        });
+    }
+
     bind() {
+        this.bindSearch();
         document.querySelectorAll("[data-sort]").forEach(button => button.addEventListener("click", () => {
             this.descending = this.sortField === button.dataset.sort ? !this.descending : false;
             this.sortField = button.dataset.sort;
@@ -118,9 +162,17 @@ class InventoryPage {
         const result = await this.request(`/inventory/items?sort=${this.sortField}&descending=${this.descending}`);
         if (version !== this.refreshVersion) return;
         this.items = new Map(result.items.map(item => [item.id, item]));
+        this.renderProducts();
+    }
+
+    renderProducts() {
+        const query = document.getElementById('product-search').value;
+        document.getElementById('clear-product-search').hidden = !query;
+        const items = [...this.items.values()];
+        const matching = items.filter(item => matchesInventoryItem(item, query));
         const body = document.getElementById("products-body");
         body.replaceChildren();
-        if (!result.items.length) {
+        if (!items.length) {
             const row = this.element("tr");
             const cell = this.element("td", undefined, "empty-state");
             cell.colSpan = 9;
@@ -131,7 +183,13 @@ class InventoryPage {
             cell.append(icon, this.element("div", "Товаров пока нет"));
             row.append(cell);
             body.append(row);
-        } else result.items.forEach(item => body.append(this.productRow(item)));
+        } else if (!matching.length) {
+            const row = this.element('tr');
+            const cell = this.element('td', 'Ничего не найдено', 'search-empty');
+            cell.colSpan = 9;
+            row.append(cell);
+            body.append(row);
+        } else matching.forEach(item => body.append(this.productRow(item)));
     }
 
     watchExpiryDay() {
@@ -366,5 +424,5 @@ class InventoryPage {
     }
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = {InventoryPage};
+if (typeof module !== "undefined" && module.exports) module.exports = {InventoryPage, matchesInventoryItem};
 else new InventoryPage(document.querySelector(".clinic-inventory"));
