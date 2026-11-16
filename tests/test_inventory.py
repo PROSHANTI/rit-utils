@@ -352,7 +352,7 @@ def test_page_has_search_without_activity_filter_or_pagination(authenticated_cli
     assert html.index('id="product-search-field"') < html.index('id="toggle-product-search"')
     assert 'id="clear-product-search"' in html
     assert "Только активные" not in html and "only-active" not in html and "pagination" not in html
-    assert "inventory.js?v=table-search-1" in html and "inventory.css?v=table-search-1" in html
+    assert "inventory.js?v=table-search-1" in html and "inventory.css?v=table-headers-1" in html
     assert store.items() == before
 
 

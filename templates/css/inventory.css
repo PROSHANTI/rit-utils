@@ -13,7 +13,7 @@ button:disabled { opacity: .45; cursor: default; filter: none; }
 button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ffa2b9; outline-offset: 3px; }
 .inventory-panel { border: 1px solid #ffffff1a; border-radius: 14px; background: #1e171be8; box-shadow: 0 10px 30px #0004; overflow: hidden; }
 .table-scroll { overflow-x: auto; }
-.stock-table { width: 100%; min-width: 1110px; border-collapse: collapse; table-layout: fixed; font-size: 13px; text-align: left; }
+.stock-table { width: 100%; min-width: 1110px; border-collapse: collapse; table-layout: auto; font-size: 13px; text-align: left; }
 .stock-table col:nth-child(1) { width: 48px; }
 .stock-table col:nth-child(2) { width: 100px; }
 .stock-table col:nth-child(3) { width: 125px; }
@@ -29,6 +29,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .sort-arrow { color: #ca9da8; font-size: 12px; }
 .stock-table th[aria-sort="ascending"] .sort-arrow, .stock-table th[aria-sort="descending"] .sort-arrow { color: #fff; }
 .stock-table th, .stock-table td { padding: 16px 12px; border-bottom: 1px solid #4b2b35; line-height: 1.55; vertical-align: middle; overflow-wrap: anywhere; }
+.stock-table thead th { position: relative; text-align: center; padding-left: 6px; padding-right: 6px; overflow-wrap: normal; word-break: normal; }
+.stock-table thead .sort-button { max-width: none; gap: 4px; justify-content: center; text-align: center; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.stock-table .sort-arrow { font-size: 11px; opacity: .65; }
+.stock-table thead th:not(:last-child)::after { content: ''; position: absolute; top: 18%; bottom: 18%; right: 0; width: 1px; background: #af657d66; pointer-events: none; }
 .stock-table tbody tr:last-child td { border-bottom: 0; }
 .stock-table tbody tr:nth-child(even) { background: #ffffff04; }
 .stock-table tbody tr:hover { background: #ff416c09; }

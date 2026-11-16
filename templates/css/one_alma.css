@@ -108,9 +108,13 @@ button:disabled { opacity: .5; cursor: default; }
 .expiry-legend span:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#e78091;margin-right:7px}
 .expiry-legend span+span:before{background:#e7c865}
 
-.inventory-table { min-width: 1180px; table-layout: fixed; font-size: 13px; }
+.inventory-table { min-width: 1180px; table-layout: auto; font-size: 13px; }
 .inventory-table th, .inventory-table td { padding: 14px 8px; }
-.inventory-table th { font-size: 12px; white-space: normal; }
+.inventory-table th { position: relative; padding-left: 6px; padding-right: 6px; text-align: center; font-size: 12px; white-space: normal; }
+.inventory-table .sort-button { max-width: none; gap: 4px; justify-content: center; text-align: center; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.inventory-table .sort-button > span { font-size: 11px; opacity: .65; }
+.inventory-table .market-heading { display: inline-block; font-weight: inherit; line-height: 1.5; white-space: nowrap; }
+.inventory-table th:not(:last-child)::after { content: ''; position: absolute; top: 18%; bottom: 18%; right: 0; width: 1px; background: #af657d66; pointer-events: none; }
 .inventory-table th:nth-child(3) { width: auto; }
 .inventory-table td:nth-child(3) { overflow-wrap: anywhere; }
 .inventory-table col:nth-child(1) { width: 52px; }
@@ -178,7 +182,7 @@ button:disabled { opacity: .5; cursor: default; }
 .stat-card.written-off-stat strong { color: #bcbec7; }
 .stat-card:nth-child(4) strong { color: #8dd9ad; }
 .inventory-table { min-width: 1250px; }
-.inventory-table col:nth-child(11) { width: 70px; }
+.inventory-table col:nth-child(11) { width: 90px; }
 .inventory-table col:nth-child(12) { width: 170px; }
 .writeoff-cell { text-align: center; white-space: nowrap; }
 .writeoff-badge { background: #43434c; border-color: #7a7c88; color: #eeeef5; }
