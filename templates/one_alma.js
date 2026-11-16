@@ -24,7 +24,13 @@
     const salePrice = document.getElementById('sale-price');
     const historyDialog = document.getElementById('history-dialog');
     const undoDialog = document.getElementById('undo-dialog');
+    const writeoffDialog = document.getElementById('writeoff-dialog');
+    const writeoffQuantity = document.getElementById('writeoff-quantity');
+    const writeoffComment = document.getElementById('writeoff-comment');
+    const salesHistoryDialog = document.getElementById('sales-history-dialog');
     let saleRow = null, historyRow = null, saleRequestId = '', cancelSaleId = null;
+    let writeoffRow = null, writeoffRequestId = '', cancelWriteoffId = null, salesData = null;
+    const remaining = row => Number(row.dataset.quantity) - Number(row.dataset.sold) - Number(row.dataset.writtenOff || 0);
     const moscowTime = value => new Intl.DateTimeFormat('ru-RU', {timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).format(value);
     const rubles = cents => cents === null ? '—' : new Intl.NumberFormat('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(cents / 100) + ' ₽';
     function priceCents(raw) {
@@ -37,7 +43,7 @@
     let busy = false;
     const params = new URLSearchParams(window.location.search);
     const requestedSort = Number(params.get('sort') || 0);
-    let sortColumn = Number.isInteger(requestedSort) && requestedSort >= 0 && requestedSort <= 9 ? requestedSort : 0;
+    let sortColumn = Number.isInteger(requestedSort) && requestedSort >= 0 && requestedSort <= 10 ? requestedSort : 0;
     let descending = params.get('descending') === 'true';
     const collator = new Intl.Collator('ru', {numeric: true, sensitivity: 'base'});
 
@@ -71,26 +77,28 @@
 
     function setBusy(value) {
         busy = value;
-        container.querySelectorAll('button, input').forEach(control => { control.disabled = busy; });
+        container.querySelectorAll('button, input, textarea').forEach(control => { control.disabled = busy; });
         download.setAttribute('aria-disabled', String(busy));
         if (!busy) {
             tableBody.querySelectorAll('[data-count-kind="showcase"]').forEach(button => {
                 const row = button.closest('tr');
-                button.disabled = Number(row.dataset.quantity) === Number(row.dataset.sold);
+                button.disabled = remaining(row) === 0;
             });
         }
-        tableBody.querySelectorAll('.record-sale').forEach(button => {
+        tableBody.querySelectorAll('.record-sale, .writeoff-badge').forEach(button => {
             const row = button.closest('tr');
-            button.disabled = busy || Number(row.dataset.quantity) === Number(row.dataset.sold);
+            button.disabled = busy || remaining(row) === 0;
         });
         updateCountControls();
         updateSaleControls();
+        updateWriteoffControls();
     }
 
     function sortValue(row, column) {
         const cells = JSON.parse(row.dataset.cells);
         if (column === 8) return Number(row.dataset.sold);
         if (column === 9) return Number(row.dataset.showcase);
+        if (column === 10) return Number(row.dataset.writtenOff);
         const text = cells[column];
         if (text === '' || text === '—') return null;
         if ([0, 5, 6, 7].includes(column)) return Number(text.replaceAll(' ', '').replace(',', '.'));
@@ -151,7 +159,7 @@
         countRow = button.closest('tr');
         countAnchor = button;
         const cells = JSON.parse(countRow.dataset.cells);
-        const maximum = Number(countRow.dataset.quantity) - Number(countRow.dataset.sold);
+        const maximum = remaining(countRow);
         document.getElementById('count-context').textContent = `${cells[1]} · можно выставить до ${maximum} шт.`;
         countInput.max = maximum;
         countInput.value = countRow.dataset.showcase;
@@ -173,6 +181,7 @@
         }
         document.getElementById('total-count').textContent = data.total;
         document.getElementById('sold-count').textContent = data.sold;
+        document.getElementById('written-off-count').textContent = data.written_off;
         document.getElementById('available-count').textContent = data.available;
         document.getElementById('sales-amount').textContent = `${data.sales_amount} ₽`;
         document.getElementById('sales-unpriced').textContent = data.sales_unpriced ? ` · без цены: ${data.sales_unpriced} шт.` : '';
@@ -186,8 +195,10 @@
         for (const product of data.products) {
             const row = tableBody.querySelector(`[data-product-id="${product.id}"]`);
             row.dataset.sold = product.sold;
+            row.dataset.writtenOff = product.written_off;
             row.dataset.showcase = product.showcase_quantity;
             row.classList.toggle('sold-out', product.available === 0);
+            row.classList.toggle('has-writeoff', product.written_off > 0);
             row.classList.toggle('expiry-expired', product.expiry_status === 'expired');
             row.classList.toggle('expiry-soon', product.expiry_status === 'soon');
             const soldButton = row.querySelector('.sold-badge');
@@ -197,6 +208,9 @@
             const showcaseButton = row.querySelector('[data-count-kind="showcase"]');
             showcaseButton.classList.toggle('empty', product.showcase_quantity === 0);
             showcaseButton.textContent = product.showcase_quantity > 0 ? `✓ ${product.showcase_quantity} шт.` : '+';
+            const writeoffButton = row.querySelector('.writeoff-badge');
+            writeoffButton.textContent = product.written_off || '+';
+            writeoffButton.classList.toggle('empty', product.written_off === 0);
         }
         window.OneAlmaExpiry.refresh(tableBody.querySelectorAll('tr'));
         sortRows();
@@ -352,7 +366,7 @@
 
     function updateSaleControls() {
         if (!saleRow) return;
-        const maximum = Number(saleRow.dataset.quantity) - Number(saleRow.dataset.sold);
+        const maximum = remaining(saleRow);
         const quantity = Number(saleQuantity.value);
         const quantityError = !Number.isInteger(quantity) || quantity < 1 || quantity > maximum ?
             `Укажите целое количество от 1 до ${maximum}.` : '';
@@ -375,11 +389,11 @@
         saleRequestId = crypto.randomUUID();
         saleForm.reset();
         const cells = JSON.parse(row.dataset.cells);
-        const available = Number(row.dataset.quantity) - Number(row.dataset.sold);
+        const available = remaining(row);
         document.getElementById('sale-context').textContent = cells[2];
         document.getElementById('sale-article').value = cells[1];
         document.getElementById('sale-date').value = moscowTime(new Date());
-        document.getElementById('sale-price-note').textContent = `Цена ЦБ: ${rubles(priceCents(cells[5]))}. Изменение сохранится только в этой продаже.`;
+        document.getElementById('sale-price-note').textContent = `Цена TheOneAlma +10%: ${rubles(priceCents(cells[5]))}. Изменение сохранится только в этой продаже.`;
         salePrice.value = priceCents(cells[5]) === null ? '' : cells[5];
         saleQuantity.value = '1';
         saleQuantity.max = available;
@@ -398,7 +412,7 @@
         try {
             const data = await api(`/one_alma/products/${row.dataset.productId}/history`, {method: 'GET'});
             if (row !== historyRow || !historyDialog.open) return;
-            summary.textContent = `Продано: ${data.sold} шт. · Сумма: ${data.amount} ₽` +
+            summary.textContent = `Витрина: ${data.showcase_quantity} шт. · Продано: ${data.sold} из ${data.total} · Списано: ${data.written_off} шт. · Осталось: ${data.available} шт. · Сумма продаж: ${data.amount} ₽` +
                 (data.unpriced ? ` · без цены: ${data.unpriced} шт.` : '') +
                 (data.legacy_sold ? ` · Ранее отмечено без записи в истории: ${data.legacy_sold} шт.` : '');
             content.replaceChildren();
@@ -411,23 +425,22 @@
             const scroll = document.createElement('div'); scroll.className = 'inventory-scroll';
             const table = document.createElement('table'); table.className = 'history-table';
             const head = table.createTHead().insertRow();
-            for (const label of ['Дата · Москва', 'Товар', 'Действие', 'Кому', 'Кол-во, шт.', 'Цена за шт., ₽', 'Сумма, ₽', '']) {
+            for (const label of ['Дата', 'Товар', 'Действие', 'Кому', 'Кол-во, шт.', 'Цена за шт., ₽', 'Сумма, ₽', 'Комментарий', '']) {
                 const cell = document.createElement('th'); cell.textContent = label; head.appendChild(cell);
             }
             const body = table.createTBody();
             for (const entry of data.entries) {
                 const line = body.insertRow(); line.classList.toggle('cancelled', entry.cancelled);
                 entry.values.forEach(value => { line.insertCell().textContent = value; });
+                line.insertCell().textContent = entry.comment || '';
                 const action = line.insertCell();
                 if (entry.can_cancel) {
                     const button = document.createElement('button'); button.type = 'button';
                     button.className = 'secondary-button'; button.textContent = 'Отменить';
                     button.disabled = busy;
                     button.addEventListener('click', () => {
-                        cancelSaleId = entry.sale_id;
-                        document.getElementById('undo-text').textContent = `${entry.values[2]}. ${entry.values[3]}, ${entry.values[4].replace('−', '')} шт. Вернуть их в остаток?`;
-                        document.getElementById('undo-error').textContent = '';
-                        undoDialog.showModal();
+                        openCancellation(entry.writeoff_id ? 'writeoff' : 'sale', entry.writeoff_id || entry.sale_id,
+                            `${entry.values[2]}. ${entry.values[4].replace('−', '')} шт. Вернуть их в остаток?`);
                     });
                     action.appendChild(button);
                 }
@@ -484,19 +497,133 @@
         saleDialog.close(); openHistory(saleRow);
     });
     document.getElementById('undo-confirm').addEventListener('click', async () => {
-        if (busy || cancelSaleId === null) return;
+        if (busy || (cancelSaleId === null && cancelWriteoffId === null)) return;
         setBusy(true);
         try {
-            const data = await api(`/one_alma/sales/${cancelSaleId}/cancel`, {
+            const data = await api(cancelWriteoffId !== null ? `/one_alma/writeoffs/${cancelWriteoffId}/cancel` : `/one_alma/sales/${cancelSaleId}/cancel`, {
                 method: 'POST', body: new URLSearchParams({csrf_token: csrfToken}),
             });
             applyInventory(data);
             undoDialog.close();
-            await loadHistory();
-            status.classList.remove('error'); status.textContent = 'Продажа отменена.';
+            if (historyDialog.open) await loadHistory();
+            if (salesHistoryDialog.open) await loadSales();
+            status.classList.remove('error'); status.textContent = cancelWriteoffId !== null ? 'Списание отменено.' : 'Продажа отменена.';
         } catch (error) { document.getElementById('undo-error').textContent = errorMessage(error); }
         finally { setBusy(false); }
     });
+    function openCancellation(kind, id, text) {
+        cancelSaleId = kind === 'sale' ? id : null;
+        cancelWriteoffId = kind === 'writeoff' ? id : null;
+        const label = kind === 'writeoff' ? 'Отменить списание' : 'Отменить продажу';
+        document.getElementById('undo-heading').textContent = `${label}?`;
+        document.getElementById('undo-confirm').textContent = label;
+        document.getElementById('undo-keep').textContent = kind === 'writeoff' ? 'Оставить списание' : 'Оставить продажу';
+        document.getElementById('undo-text').textContent = text;
+        document.getElementById('undo-error').textContent = '';
+        undoDialog.showModal();
+    }
+
+    function updateWriteoffControls() {
+        if (!writeoffRow) return;
+        const quantity = Number(writeoffQuantity.value), maximum = remaining(writeoffRow);
+        const valid = writeoffQuantity.value !== '' && Number.isInteger(quantity) && quantity >= 1 && quantity <= maximum;
+        const commentValid = writeoffComment.value.length <= 255;
+        document.getElementById('writeoff-minus').disabled = busy || quantity <= 1;
+        document.getElementById('writeoff-plus').disabled = busy || quantity >= maximum;
+        document.getElementById('writeoff-save').disabled = busy || !valid || !commentValid;
+        document.getElementById('writeoff-comment-count').textContent = `${writeoffComment.value.length} / 255`;
+        const showcase = Number(writeoffRow.dataset.showcase);
+        const outcome = document.getElementById('writeoff-outcome');
+        outcome.textContent = valid ? `Останется: ${maximum - quantity} шт. Списано всего: ${Number(writeoffRow.dataset.writtenOff) + quantity} шт.` : `Укажите целое количество от 1 до ${maximum}.`;
+        if (valid && showcase > maximum - quantity) outcome.textContent += ` На витрине останется ${maximum - quantity} шт. вместо ${showcase}.`;
+        return valid && commentValid;
+    }
+
+    tableBody.querySelectorAll('.writeoff-badge').forEach(button => {
+        button.addEventListener('click', () => {
+            writeoffRow = button.closest('tr');
+            writeoffRequestId = crypto.randomUUID();
+            const cells = JSON.parse(writeoffRow.dataset.cells);
+            document.getElementById('writeoff-context').textContent = `${cells[1]} · ${cells[2]}. В наличии: ${remaining(writeoffRow)} шт.`;
+            writeoffQuantity.value = '1'; writeoffQuantity.max = remaining(writeoffRow);
+            writeoffComment.value = ''; document.getElementById('writeoff-error').textContent = '';
+            updateWriteoffControls(); writeoffDialog.showModal(); writeoffQuantity.focus();
+        });
+    });
+    [writeoffQuantity, writeoffComment].forEach(input => input.addEventListener('input', updateWriteoffControls));
+    for (const [id, delta] of [['writeoff-minus', -1], ['writeoff-plus', 1]]) {
+        document.getElementById(id).addEventListener('click', () => {
+            writeoffQuantity.value = Math.max(1, Math.min(remaining(writeoffRow), (Number(writeoffQuantity.value) || 1) + delta));
+            updateWriteoffControls();
+        });
+    }
+    document.getElementById('writeoff-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        if (busy || !writeoffRow || !updateWriteoffControls()) return;
+        const body = new URLSearchParams({quantity: writeoffQuantity.value, comment: writeoffComment.value,
+            request_id: writeoffRequestId, csrf_token: csrfToken});
+        setBusy(true); document.getElementById('writeoff-error').textContent = '';
+        try {
+            const data = await api(`/one_alma/products/${writeoffRow.dataset.productId}/writeoffs`, {method: 'POST', body});
+            applyInventory(data); writeoffDialog.close();
+            status.classList.remove('error'); status.textContent = 'Списание сохранено.';
+        } catch (error) { document.getElementById('writeoff-error').textContent = errorMessage(error); }
+        finally { setBusy(false); }
+    });
+
+    function textElement(tag, text, className = '') {
+        const element = document.createElement(tag); element.textContent = text;
+        if (className) element.className = className;
+        return element;
+    }
+    function renderSales() {
+        if (!salesData) return;
+        const content = document.getElementById('sales-history-content');
+        const showCancelled = document.getElementById('show-cancelled-sales').checked;
+        document.getElementById('sales-history-summary').textContent = `Продано: ${salesData.sold} шт. · Сумма: ${salesData.amount} ₽` +
+            (salesData.unpriced ? ` · Без цены: ${salesData.unpriced} шт.` : '');
+        content.replaceChildren();
+        const sales = salesData.sales.filter(sale => showCancelled || !sale.cancelled_at);
+        if (!sales.length) { content.appendChild(textElement('p', 'Продаж пока нет.', 'empty-message')); return; }
+        for (const sale of sales) {
+            const card = document.createElement('article');
+            card.className = `sale-receipt${sale.cancelled_at ? ' cancelled' : ''}`;
+            const heading = document.createElement('div'); heading.className = 'receipt-heading';
+            heading.append(textElement('h3', `Продажа #${sale.id}`), textElement('time', sale.created_at));
+            card.append(heading, textElement('p', `Кому: ${sale.customer}`, 'receipt-customer'));
+            card.appendChild(textElement('p', `${sale.cells[1]} · ${sale.cells[2]}`, 'receipt-product'));
+            card.appendChild(textElement('p', `${sale.cells[3]} · ${sale.quantity} шт. × ${sale.price} ₽`, 'receipt-quantity'));
+            const total = document.createElement('div'); total.className = 'receipt-total';
+            total.append(textElement('span', 'Итого'), textElement('strong', `${sale.amount} ₽`));
+            card.appendChild(total);
+            if (sale.cancelled_at) card.appendChild(textElement('p', `Отменена: ${sale.cancelled_at}`, 'receipt-cancelled'));
+            const actions = document.createElement('div'); actions.className = 'receipt-actions';
+            const pdf = textElement('a', 'PDF продажи', 'secondary-button');
+            pdf.href = `/one_alma/sales/pdf?sale_id=${sale.id}`; pdf.download = `one_alma_sale_${sale.id}.pdf`;
+            actions.appendChild(pdf);
+            if (sale.can_cancel) {
+                const cancel = textElement('button', 'Отменить продажу', 'secondary-button');
+                cancel.type = 'button'; cancel.disabled = busy;
+                cancel.addEventListener('click', () => openCancellation('sale', sale.id,
+                    `Продажа #${sale.id}. ${sale.customer}, ${sale.quantity} шт. Вернуть их в остаток?`));
+                actions.appendChild(cancel);
+            }
+            card.appendChild(actions); content.appendChild(card);
+        }
+    }
+    async function loadSales() {
+        try {
+            const data = await api('/one_alma/sales', {method: 'GET'});
+            if (!salesHistoryDialog.open) return;
+            salesData = data; renderSales();
+        } catch (error) { document.getElementById('sales-history-content').textContent = errorMessage(error); }
+    }
+    document.getElementById('sales-history').addEventListener('click', () => {
+        document.getElementById('sales-history-content').textContent = 'Загружаю…';
+        salesHistoryDialog.showModal(); loadSales();
+    });
+    document.getElementById('show-cancelled-sales').addEventListener('change', renderSales);
+
     container.querySelectorAll('[data-close]').forEach(button => {
         button.addEventListener('click', () => { if (!busy) button.closest('dialog').close(); });
     });

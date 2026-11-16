@@ -414,10 +414,10 @@ def test_pdf_contains_every_product_and_current_counts_and_cb_amounts(repository
     reader = PdfReader(BytesIO(pdf))
     text = "\n".join(page.extract_text() for page in reader.pages)
     assert pdf.startswith(b"%PDF-")
-    assert "Всего товаров: 50. Продано: 1. В наличии: 49." in text
+    assert "Всего товаров: 50. Продано: 1. Списано: 0. В наличии: 49." in text
     assert "63 946,54" in text and "1 343,43" in text and "62 603,11" in text
-    assert "Стоимость по цене ЦБ РФ" in text
-    assert "Цена ЦБ, ₽" in text
+    assert "Стоимость по цене TheOneAlma +10%" in text
+    assert "TheOneAlma" in text and "+10%" in text
     assert "Цена по ЦБ РФ на 27.05" not in text
     for product in inventory.products:
         assert product.cells[1] in text

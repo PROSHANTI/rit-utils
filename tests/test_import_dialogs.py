@@ -100,7 +100,7 @@ def test_one_alma_keeps_single_row_controls_without_selection_column(authenticat
     assert header_match is not None
     header = header_match.group(0)
 
-    assert len(re.findall(r"<th\b", header)) == 11
+    assert len(re.findall(r"<th\b", header)) == 12
     assert html.count('class="icon-button delete-product"') == 25
     assert html.count('class="icon-button record-sale"') == 25
     assert all(token not in html for token in ("Удалить выбранные", "selection-count", "select-all", "select-product"))

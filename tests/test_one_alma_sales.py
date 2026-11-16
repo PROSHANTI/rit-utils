@@ -11,7 +11,7 @@ from pypdf import PdfReader
 
 from src.main import application
 from src.utils.one_alma.models import NewProduct
-from src.utils.one_alma.pdf_export import InventoryPdfExporter
+from src.utils.one_alma.pdf_export import SalesPdfExporter
 from src.utils.one_alma.repository import InventoryRepository
 
 
@@ -260,7 +260,12 @@ def test_migration_preserves_existing_rows_sales_and_showcase(tmp_path):
     assert first.sold == 2 and first.total == 5 and first.showcase_quantity == 2
     assert first.sales == first.history == ()
     with sqlite3.connect(path) as connection:
-        assert {table: connection.execute(f"SELECT * FROM {table} ORDER BY id").fetchall() for table in before} == before
+        assert connection.execute("SELECT * FROM products ORDER BY id").fetchall() == before["products"]
+        assert (
+            connection.execute("SELECT id,product_id,number,sold FROM product_units ORDER BY id").fetchall()
+            == before["product_units"]
+        )
+        assert first.written_off == 0
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
@@ -281,6 +286,7 @@ def test_sale_history_cancel_endpoints_and_pdf(web, repository, product):
     sale = repository.snapshot().sales[-1]
     cancelled = client.post(f"/one_alma/sales/{sale.id}/cancel", data={"csrf_token": csrf})
     pdf = client.get("/one_alma/pdf?sort=9&descending=true")
+    sales_pdf = client.get("/one_alma/sales/pdf")
 
     assert sold.status_code == history.status_code == cancelled.status_code == pdf.status_code == 200
     assert history.headers["cache-control"] == "no-store"
@@ -288,9 +294,11 @@ def test_sale_history_cancel_endpoints_and_pdf(web, repository, product):
     assert entry["can_cancel"] and entry["values"][3] == body["customer"]
     assert cancelled.json()["products"][-1]["sold"] == 0
     text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(pdf.content)).pages)
-    assert "История изменений" in text and "Макс & компания" in text and "80,25" in text
-    assert "Отмена продажи" in text
-    assert "-80,25" in text
+    assert "История изменений" in text and "Макс & компания" not in text
+    assert "Отмена продажи" not in text
+    sales_text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(sales_pdf.content)).pages)
+    assert sales_pdf.status_code == 200
+    assert "Макс & компания" in sales_text and "80,25" in sales_text and "Отменена" in sales_text
     assert "Москва, UTC+3" not in text and "Отмены сохранены отдельными строками" not in text
 
 
@@ -363,7 +371,7 @@ def test_pdf_has_history_and_actual_prices_after_product_edit(repository, produc
     repository.update_product(product.id, replace(item, central_bank_price="500"))
     inventory = repository.snapshot().sorted_by(0, True)
 
-    content = InventoryPdfExporter().export(inventory)
+    content = SalesPdfExporter().export(inventory)
 
     text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(content)).pages)
     assert "Покупатель" in text and "160,00" in text and "80,00" in text

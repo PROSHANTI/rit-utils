@@ -18,6 +18,7 @@ from .models import (
     Product,
     ProductUnit,
     Sale,
+    Writeoff,
     format_cents,
     product_key,
     shipment_fingerprint,
@@ -63,7 +64,7 @@ class InventoryRepository:
                 return self._snapshot(connection)
             cells = self._product_cells(connection, product_id)
             available = connection.execute(
-                "SELECT id FROM product_units WHERE product_id=? AND sold=0 ORDER BY number", (product_id,)
+                "SELECT id FROM product_units WHERE product_id=? AND sold=0 AND written_off=0 ORDER BY number", (product_id,)
             ).fetchall()
             if quantity > len(available):
                 raise ValueError(f"Можно продать не больше {len(available)} шт. Обновите остаток.")
@@ -118,9 +119,87 @@ class InventoryRepository:
         logger.info("Отменена продажа OneAlma: %s", sale_id)
         return inventory
 
+    def record_writeoff(self, product_id: int, quantity: int, comment: str, request_id: str) -> Inventory:
+        if type(quantity) is not int or not 1 <= quantity <= 1000:
+            raise ValueError("Укажите целое количество от 1 до 1000.")
+        comment = comment.strip()
+        if len(comment) > 255:
+            raise ValueError("В поле «Комментарий» можно ввести до 255 символов.")
+        try:
+            request_id = str(UUID(request_id))
+        except ValueError:
+            raise ValueError("Обновите окно списания и повторите действие.") from None
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute("SELECT * FROM one_alma_writeoffs WHERE request_id=?", (request_id,)).fetchone()
+            if previous:
+                if (previous["product_id"], previous["quantity"], previous["comment"]) != (product_id, quantity, comment):
+                    raise ValueError("Этот запрос уже использован. Откройте новое списание.")
+                return self._snapshot(connection)
+            cells = self._product_cells(connection, product_id)
+            available = connection.execute(
+                "SELECT id FROM product_units WHERE product_id=? AND sold=0 AND written_off=0 ORDER BY number", (product_id,)
+            ).fetchall()
+            if quantity > len(available):
+                raise ValueError(f"Можно списать не больше {len(available)} шт. Обновите остаток.")
+            created_at = datetime.now(UTC).isoformat()
+            cursor = connection.execute(
+                """INSERT INTO one_alma_writeoffs(product_id,cells_json,quantity,comment,created_at,request_id)
+                   VALUES (?,?,?,?,?,?)""",
+                (product_id, json.dumps(cells, ensure_ascii=False), quantity, comment, created_at, request_id),
+            )
+            writeoff_id = cursor.lastrowid
+            unit_ids = [row["id"] for row in available[:quantity]]
+            connection.executemany("UPDATE product_units SET written_off=1 WHERE id=?", [(unit_id,) for unit_id in unit_ids])
+            connection.executemany(
+                "INSERT INTO one_alma_writeoff_units(writeoff_id,unit_id) VALUES (?,?)",
+                [(writeoff_id, unit_id) for unit_id in unit_ids],
+            )
+            self._clamp_showcase(connection, product_id)
+            self._event(connection, product_id, "writeoff", {}, cells=cells, writeoff_id=writeoff_id, created_at=created_at)
+            inventory = self._snapshot(connection)
+        logger.info("Оформлено списание OneAlma: %s, позиция %s, количество %s", writeoff_id, product_id, quantity)
+        return inventory
+
+    def cancel_writeoff(self, writeoff_id: int) -> Inventory:
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            writeoff = connection.execute("SELECT * FROM one_alma_writeoffs WHERE id=?", (writeoff_id,)).fetchone()
+            if writeoff is None:
+                raise LookupError("Списание не найдено.")
+            if writeoff["cancelled_at"] is not None:
+                raise ValueError("Это списание уже отменено.")
+            units = connection.execute(
+                """SELECT u.id,u.sold,u.written_off,u.product_id FROM one_alma_writeoff_units w
+                   JOIN product_units u ON u.id=w.unit_id WHERE w.writeoff_id=?""",
+                (writeoff_id,),
+            ).fetchall()
+            if len(units) != writeoff["quantity"] or any(
+                not unit["written_off"] or unit["sold"] or unit["product_id"] != writeoff["product_id"] for unit in units
+            ):
+                raise ValueError("Товар удалён или остаток изменился. Не удалось отменить списание.")
+            cancelled_at = datetime.now(UTC).isoformat()
+            connection.executemany("UPDATE product_units SET written_off=0 WHERE id=?", [(unit["id"],) for unit in units])
+            connection.execute("UPDATE one_alma_writeoffs SET cancelled_at=? WHERE id=?", (cancelled_at, writeoff_id))
+            self._event(
+                connection,
+                writeoff["product_id"],
+                "cancel_writeoff",
+                {},
+                cells=tuple(json.loads(writeoff["cells_json"])),
+                writeoff_id=writeoff_id,
+                created_at=cancelled_at,
+            )
+            inventory = self._snapshot(connection)
+        logger.info("Отменено списание OneAlma: %s", writeoff_id)
+        return inventory
+
     def set_sold(self, unit_id: int, sold: bool) -> Inventory:
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
+            unit = connection.execute("SELECT written_off FROM product_units WHERE id=?", (unit_id,)).fetchone()
+            if unit is not None and sold and unit["written_off"]:
+                raise ValueError("Эта единица списана. Сначала отмените списание через историю товара.")
             if not sold and self._managed_units(connection, [unit_id]):
                 raise ValueError("Отмените эту продажу через историю товара.")
             cursor = connection.execute("UPDATE product_units SET sold = ? WHERE id = ?", (int(sold), unit_id))
@@ -136,17 +215,17 @@ class InventoryRepository:
         with self._connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             units = connection.execute(
-                "SELECT id, sold FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
+                "SELECT id, sold, written_off FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
             ).fetchall()
             if not units:
                 raise LookupError("Товар не найден")
-            self._validate_count(quantity, len(units))
+            self._validate_count(quantity, sum(not unit["written_off"] for unit in units))
             managed = self._managed_units(connection, [unit["id"] for unit in units])
             if quantity < len(managed):
                 raise ValueError("Отмените оформленные продажи через историю товара.")
             delta = quantity - sum(unit["sold"] for unit in units)
             candidates = (
-                [unit for unit in units if not unit["sold"]]
+                [unit for unit in units if not unit["sold"] and not unit["written_off"]]
                 if delta > 0
                 else [unit for unit in reversed(units) if unit["sold"] and unit["id"] not in managed]
             )
@@ -164,7 +243,7 @@ class InventoryRepository:
             if not connection.execute("SELECT 1 FROM products WHERE id=?", (product_id,)).fetchone():
                 raise LookupError("Товар не найден")
             available = connection.execute(
-                "SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0", (product_id,)
+                "SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0 AND written_off=0", (product_id,)
             ).fetchone()[0]
             self._validate_count(quantity, available)
             before = connection.execute("SELECT showcase_quantity FROM products WHERE id=?", (product_id,)).fetchone()[0]
@@ -199,10 +278,12 @@ class InventoryRepository:
         *,
         cells: tuple[str, ...] | None = None,
         sale_id: int | None = None,
+        writeoff_id: int | None = None,
         created_at: str | None = None,
     ) -> None:
         connection.execute(
-            """INSERT INTO one_alma_history(product_id,cells_json,kind,details_json,sale_id,created_at) VALUES (?,?,?,?,?,?)""",
+            """INSERT INTO one_alma_history(product_id,cells_json,kind,details_json,sale_id,created_at,writeoff_id)
+               VALUES (?,?,?,?,?,?,?)""",
             (
                 product_id,
                 json.dumps(cells or cls._product_cells(connection, product_id), ensure_ascii=False),
@@ -210,6 +291,7 @@ class InventoryRepository:
                 json.dumps(details, ensure_ascii=False),
                 sale_id,
                 created_at or datetime.now(UTC).isoformat(),
+                writeoff_id,
             ),
         )
 
@@ -222,7 +304,7 @@ class InventoryRepository:
     def _clamp_showcase(connection: sqlite3.Connection, product_id: int) -> None:
         connection.execute(
             """UPDATE products SET showcase_quantity=MIN(showcase_quantity,
-               (SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0)) WHERE id=?""",
+               (SELECT COUNT(*) FROM product_units WHERE product_id=? AND sold=0 AND written_off=0)) WHERE id=?""",
             (product_id, product_id),
         )
 
@@ -393,6 +475,7 @@ class InventoryRepository:
                 product_id INTEGER NOT NULL REFERENCES products(id),
                 number INTEGER NOT NULL CHECK (number > 0),
                 sold INTEGER NOT NULL DEFAULT 0 CHECK (sold IN (0, 1)),
+                written_off INTEGER NOT NULL DEFAULT 0 CHECK (written_off IN (0, 1) AND (written_off=0 OR sold=0)),
                 UNIQUE (product_id, number)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS products_position ON products(position);
@@ -418,6 +501,22 @@ class InventoryRepository:
                 PRIMARY KEY(sale_id,unit_id)
             );
             CREATE INDEX IF NOT EXISTS one_alma_sale_product ON one_alma_sales(product_id);
+            CREATE TABLE IF NOT EXISTS one_alma_writeoffs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                cells_json TEXT NOT NULL,
+                quantity INTEGER NOT NULL CHECK(quantity > 0),
+                comment TEXT NOT NULL DEFAULT '' CHECK(length(comment) <= 255),
+                created_at TEXT NOT NULL,
+                cancelled_at TEXT,
+                request_id TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS one_alma_writeoff_units (
+                writeoff_id INTEGER NOT NULL REFERENCES one_alma_writeoffs(id),
+                unit_id INTEGER NOT NULL,
+                PRIMARY KEY(writeoff_id,unit_id)
+            );
+            CREATE INDEX IF NOT EXISTS one_alma_writeoff_product ON one_alma_writeoffs(product_id);
             CREATE TABLE IF NOT EXISTS one_alma_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_id INTEGER NOT NULL,
@@ -436,6 +535,15 @@ class InventoryRepository:
             if "showcase_quantity" not in columns:
                 connection.execute(
                     "ALTER TABLE products ADD COLUMN showcase_quantity INTEGER NOT NULL DEFAULT 0 CHECK (showcase_quantity >= 0)"
+                )
+            unit_columns = {row["name"] for row in connection.execute("PRAGMA table_info(product_units)")}
+            if "written_off" not in unit_columns:
+                connection.execute("""ALTER TABLE product_units ADD COLUMN written_off INTEGER NOT NULL DEFAULT 0
+                    CHECK (written_off IN (0, 1) AND (written_off=0 OR sold=0))""")
+            history_columns = {row["name"] for row in connection.execute("PRAGMA table_info(one_alma_history)")}
+            if "writeoff_id" not in history_columns:
+                connection.execute(
+                    "ALTER TABLE one_alma_history ADD COLUMN writeoff_id INTEGER REFERENCES one_alma_writeoffs(id)"
                 )
             if connection.execute("SELECT 1 FROM inventory_metadata WHERE key = 'seed_version'").fetchone():
                 InventoryRepository._initialize_sequences(connection)
@@ -498,15 +606,17 @@ class InventoryRepository:
     ) -> None:
         previous_cells = cls._product_cells(connection, product_id)
         units = connection.execute("SELECT * FROM product_units WHERE product_id=? ORDER BY number", (product_id,)).fetchall()
-        if quantity < sum(unit["sold"] for unit in units):
-            raise ValueError(f"№ {cells[0]}: количество не может быть меньше числа уже проданных товаров.")
+        if quantity < sum(unit["sold"] + unit["written_off"] for unit in units):
+            raise ValueError(f"№ {cells[0]}: количество не может быть меньше числа уже проданных или списанных товаров.")
         connection.execute(
             """UPDATE products SET position=?, article=?, name=?, volume=?, expiry=?,
                central_bank_price=?, wholesale_price=?, market_price=? WHERE id=?""",
             (*cells, product_id),
         )
         if quantity < len(units):
-            removable = [unit for unit in reversed(units) if not unit["sold"]][: len(units) - quantity]
+            removable = [unit for unit in reversed(units) if not unit["sold"] and not unit["written_off"]][
+                : len(units) - quantity
+            ]
             connection.executemany("DELETE FROM product_units WHERE id=?", [(unit["id"],) for unit in removable])
             remaining = connection.execute(
                 "SELECT id FROM product_units WHERE product_id=? ORDER BY number", (product_id,)
@@ -532,7 +642,7 @@ class InventoryRepository:
 
     @staticmethod
     def _snapshot(connection: sqlite3.Connection) -> Inventory:
-        rows = connection.execute("""SELECT p.*, u.id AS unit_id, u.number AS unit_number, u.sold
+        rows = connection.execute("""SELECT p.*, u.id AS unit_id, u.number AS unit_number, u.sold,u.written_off
                FROM products p JOIN product_units u ON u.product_id = p.id
                ORDER BY p.id, u.number""").fetchall()
         cells: dict[int, tuple[str, ...]] = {}
@@ -554,7 +664,9 @@ class InventoryRepository:
                     "market_price",
                 )
             )
-            units.setdefault(product_id, []).append(ProductUnit(row["unit_id"], row["unit_number"], bool(row["sold"])))
+            units.setdefault(product_id, []).append(
+                ProductUnit(row["unit_id"], row["unit_number"], bool(row["sold"]), bool(row["written_off"]))
+            )
         products = tuple(
             Product(product_id, values, tuple(units[product_id]), showcase[product_id]) for product_id, values in cells.items()
         )
@@ -572,6 +684,19 @@ class InventoryRepository:
             for row in connection.execute("SELECT * FROM one_alma_sales ORDER BY id")
         )
         sale_by_id = {sale.id: sale for sale in sales}
+        writeoffs = tuple(
+            Writeoff(
+                row["id"],
+                row["product_id"],
+                tuple(json.loads(row["cells_json"])),
+                row["quantity"],
+                row["comment"],
+                datetime.fromisoformat(row["created_at"]),
+                datetime.fromisoformat(row["cancelled_at"]) if row["cancelled_at"] else None,
+            )
+            for row in connection.execute("SELECT * FROM one_alma_writeoffs ORDER BY id")
+        )
+        writeoff_by_id = {writeoff.id: writeoff for writeoff in writeoffs}
         history = []
         for row in connection.execute("SELECT * FROM one_alma_history ORDER BY id DESC"):
             details = json.loads(row["details_json"])
@@ -598,6 +723,15 @@ class InventoryRepository:
                     price=format_cents(sale.price_cents),
                     amount=("−" if is_cancel and sale.amount_cents is not None else "") + format_cents(sale.amount_cents),
                 )
+            writeoff = writeoff_by_id.get(row["writeoff_id"])
+            if writeoff is not None:
+                is_cancel = row["kind"] == "cancel_writeoff"
+                cancelled = is_cancel or writeoff.cancelled_at is not None
+                can_cancel = not is_cancel and writeoff.cancelled_at is None and writeoff.product_id in cells
+                entry["description"] = f"{'Отмена списания' if is_cancel else 'Списание'} #{writeoff.id}"
+                if not is_cancel and writeoff.cancelled_at is not None:
+                    entry["description"] += "\nОтменено"
+                entry["quantity"] = f"{'+' if is_cancel else '−'}{writeoff.quantity}"
             history.append(
                 HistoryEntry(
                     row["id"],
@@ -608,6 +742,9 @@ class InventoryRepository:
                     sale_id=row["sale_id"],
                     cancelled=cancelled,
                     can_cancel=can_cancel,
+                    kind=row["kind"],
+                    writeoff_id=row["writeoff_id"],
+                    comment=writeoff.comment if writeoff else "",
                 )
             )
-        return Inventory(products, sales, tuple(history))
+        return Inventory(products, sales, tuple(history), writeoffs)

@@ -3,6 +3,7 @@ import hmac
 import logging
 import sqlite3
 from collections.abc import Callable
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -11,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from .excel_import import ExcelProductImporter
 from .expiry import get_expiry_info
 from .models import COLUMNS, Inventory, NewProduct, format_cents, product_key
-from .pdf_export import InventoryPdfExporter
+from .pdf_export import InventoryPdfExporter, SalesPdfExporter
 from .repository import InventoryRepository
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class OneAlmaHandler:
         self.repository = repository or InventoryRepository()
         self.templates = Jinja2Templates(directory="templates")
         self.pdf = InventoryPdfExporter()
+        self.sales_pdf = SalesPdfExporter()
 
     def page(self, request: Request) -> Response:
         try:
@@ -64,6 +66,51 @@ class OneAlmaHandler:
         self._check_csrf(request, csrf_token)
         return self._sale_change(lambda: self.repository.cancel_sale(sale_id))
 
+    def record_writeoff(
+        self, request: Request, product_id: int, quantity: int, comment: str, request_id: str, csrf_token: str
+    ) -> Response:
+        self._check_csrf(request, csrf_token)
+        return self._sale_change(lambda: self.repository.record_writeoff(product_id, quantity, comment, request_id))
+
+    def cancel_writeoff(self, request: Request, writeoff_id: int, csrf_token: str) -> Response:
+        self._check_csrf(request, csrf_token)
+        return self._sale_change(lambda: self.repository.cancel_writeoff(writeoff_id))
+
+    def sales_history(self) -> Response:
+        try:
+            inventory = self.repository.snapshot()
+        except sqlite3.Error:
+            logger.exception("Не удалось прочитать историю продаж OneAlma")
+            raise HTTPException(status_code=503, detail="История продаж временно недоступна.") from None
+        product_ids = {product.id for product in inventory.products}
+        return JSONResponse(
+            {
+                "amount": inventory.sales_amount,
+                "sold": sum(sale.quantity for sale in inventory.sales if sale.cancelled_at is None),
+                "unpriced": inventory.sales_unpriced,
+                "sales": [
+                    {
+                        "id": sale.id,
+                        "product_id": sale.product_id,
+                        "cells": sale.cells,
+                        "customer": sale.customer or "Не указан",
+                        "quantity": sale.quantity,
+                        "price": format_cents(sale.price_cents),
+                        "amount": format_cents(sale.amount_cents),
+                        "created_at": sale.created_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
+                        "cancelled_at": (
+                            sale.cancelled_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S")
+                            if sale.cancelled_at
+                            else None
+                        ),
+                        "can_cancel": sale.cancelled_at is None and sale.product_id in product_ids,
+                    }
+                    for sale in reversed(inventory.sales)
+                ],
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
     def _sale_change(self, operation: Callable[[], Inventory]) -> Response:
         try:
             inventory = operation()
@@ -72,8 +119,8 @@ class OneAlmaHandler:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except sqlite3.Error:
-            logger.exception("Не удалось сохранить продажу OneAlma")
-            raise HTTPException(status_code=503, detail="Не удалось сохранить продажу. Попробуйте позже.") from None
+            logger.exception("Не удалось сохранить операцию OneAlma")
+            raise HTTPException(status_code=503, detail="Не удалось сохранить операцию. Попробуйте позже.") from None
         return self._inventory_response(inventory)
 
     def history(self, product_id: int) -> Response:
@@ -89,6 +136,10 @@ class OneAlmaHandler:
         return JSONResponse(
             {
                 "sold": product.sold_count,
+                "total": len(product.units),
+                "written_off": product.written_off_count,
+                "available": product.available,
+                "showcase_quantity": product.showcase_quantity,
                 "legacy_sold": max(0, product.sold_count - sum(sale.quantity for sale in sales)),
                 "amount": format_cents(sum(sale.amount_cents or 0 for sale in sales)),
                 "unpriced": sum(sale.quantity for sale in sales if sale.price_cents is None),
@@ -97,6 +148,8 @@ class OneAlmaHandler:
                         "id": entry.id,
                         "values": entry.values,
                         "sale_id": entry.sale_id,
+                        "writeoff_id": entry.writeoff_id,
+                        "comment": entry.comment,
                         "cancelled": entry.cancelled,
                         "can_cancel": entry.can_cancel,
                     }
@@ -131,6 +184,7 @@ class OneAlmaHandler:
             {
                 "total": inventory.total,
                 "sold": inventory.sold,
+                "written_off": inventory.written_off,
                 "available": inventory.available,
                 "showcase_quantity": inventory.showcase_quantity,
                 "showcased_products": inventory.showcased_products,
@@ -144,10 +198,11 @@ class OneAlmaHandler:
                         "id": product.id,
                         "cells": product.cells,
                         "sold": product.sold_count,
+                        "written_off": product.written_off_count,
                         "available": product.available,
                         "showcase_quantity": product.showcase_quantity,
                         "expiry_status": get_expiry_info(product.cells[4]).status,
-                        "units": [{"id": unit.id, "sold": unit.sold} for unit in product.units],
+                        "units": [{"id": unit.id, "sold": unit.sold, "written_off": unit.written_off} for unit in product.units],
                     }
                     for product in inventory.products
                 ],
@@ -262,6 +317,24 @@ class OneAlmaHandler:
             media_type="application/pdf",
             headers={
                 "Content-Disposition": 'attachment; filename="one_alma.pdf"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    def download_sales_pdf(self, sale_id: int | None = None) -> Response:
+        try:
+            content = self.sales_pdf.export(self.repository.snapshot(), sale_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except sqlite3.Error:
+            logger.exception("Не удалось прочитать продажи OneAlma для PDF")
+            raise HTTPException(status_code=503, detail="История продаж временно недоступна.") from None
+        filename = f"one_alma_sale_{sale_id}.pdf" if sale_id else "one_alma_sales.pdf"
+        return Response(
+            content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
                 "Cache-Control": "no-store",
             },
         )

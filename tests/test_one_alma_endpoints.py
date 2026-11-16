@@ -79,8 +79,11 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert "Импорт товаров" in html and "Удалить выбранные" not in html
     assert "select-all" not in html and "select-product" not in html and "selection-count" not in html
     assert "Без цены: 4 шт." in html
-    assert len(re.findall("data-sort-column=", html)) == 10
-    assert 'data-sort-column="5">Цена ЦБ, ₽ <span' in html
+    assert len(re.findall("data-sort-column=", html)) == 11
+    assert 'data-sort-column="5">Цена TheOneAlma +10% <span' in html
+    assert 'id="sales-history"' in html and 'id="written-off-count"' in html
+    assert 'data-sort-column="10">Списан' in html
+    assert "10 000 UZS = 59,7137 ₽" in html
     assert "Цена по ЦБ РФ на 27.05, ₽" not in html
 
 

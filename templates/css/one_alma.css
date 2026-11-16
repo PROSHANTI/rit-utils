@@ -173,3 +173,44 @@ button:disabled { opacity: .5; cursor: default; }
     .sales-dialog .product-form-grid { grid-template-columns: 1fr; }
     .dialog-actions .primary { flex: 1 1 100%; }
 }
+
+.inventory-stats { grid-template-columns: repeat(4, 1fr); }
+.stat-card.written-off-stat strong { color: #bcbec7; }
+.stat-card:nth-child(4) strong { color: #8dd9ad; }
+.inventory-table { min-width: 1250px; }
+.inventory-table col:nth-child(11) { width: 70px; }
+.inventory-table col:nth-child(12) { width: 170px; }
+.writeoff-cell { text-align: center; white-space: nowrap; }
+.writeoff-badge { background: #43434c; border-color: #7a7c88; color: #eeeef5; }
+.inventory-table tr.has-writeoff > td { background: #303035; color: #b9b9c2; }
+.inventory-table tr.has-writeoff:hover > td { background: #39393f; }
+.inventory-table tr.has-writeoff > td:first-child { box-shadow: inset 3px 0 #9697a2; }
+.inventory-table tr.has-writeoff .expiry-cell { color: #b9b9c2; }
+.expiry-legend .written-off-legend:before { background: #9697a2; }
+.writeoff-comment { margin-top: 22px; }
+.writeoff-comment textarea { width: 100%; resize: vertical; min-height: 96px; padding: 12px; border: 1px solid #795267; border-radius: 8px; background: #181116; color: #fff; font: inherit; line-height: 1.5; }
+.writeoff-comment small { display: block; margin-top: 5px; text-align: right; color: #b8a6b1; font-size: 12px; }
+#writeoff-save { margin-top: 22px; }
+#writeoff-outcome { line-height: 1.6; margin-top: 18px; }
+.sales-history-tools { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 16px 0 22px; }
+.sales-history-tools label { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 13px; }
+.sales-history-tools input { width: 16px; height: 16px; margin: 0; accent-color: #e8789b; }
+.sale-receipts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sale-receipt { background: #251921; border: 1px solid #654353; border-radius: 12px; padding: 18px; }
+.sale-receipt.cancelled { opacity: .65; }
+.receipt-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.receipt-heading h3 { margin: 0; font-size: 16px; }
+.receipt-heading time { color: #c5aabb; font-size: 12px; }
+.receipt-customer, .receipt-quantity { color: #cdb6c3; font-size: 13px; margin-top: 12px; overflow-wrap: anywhere; }
+.receipt-product { font-size: 14px; line-height: 1.6; border-top: 1px dashed #705064; margin-top: 16px; padding-top: 14px; overflow-wrap: anywhere; }
+.receipt-total { display: flex; justify-content: space-between; gap: 14px; border-top: 1px dashed #705064; margin-top: 15px; padding-top: 13px; }
+.receipt-cancelled { color: #ffb1c3; font-size: 12px; margin-top: 12px; }
+.receipt-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.receipt-actions .secondary-button { font-size: 12px; padding: 8px 10px; }
+.sales-history .secondary-button { color: #e4cbd9; text-decoration: none; display: inline-block; border-radius: 7px; }
+.history-table td:nth-child(8) { max-width: 200px; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .inventory-stats { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px) {
+    .inventory-stats, .sale-receipts { grid-template-columns: 1fr; }
+    .sales-history-tools { flex-wrap: wrap; }
+}

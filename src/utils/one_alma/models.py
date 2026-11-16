@@ -14,7 +14,7 @@ COLUMNS = (
     "Наименование препарата",
     "Объём",
     "Годен до",
-    "Цена ЦБ, ₽",
+    "Цена TheOneAlma +10%",
     "Оптовая цена Emansi, ₽",
     "Средняя цена в магазинах, ₽",
 )
@@ -115,6 +115,7 @@ class ProductUnit:
     id: int
     number: int
     sold: bool
+    written_off: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +131,11 @@ class Product:
 
     @property
     def available(self) -> int:
-        return len(self.units) - self.sold_count
+        return len(self.units) - self.sold_count - self.written_off_count
+
+    @property
+    def written_off_count(self) -> int:
+        return sum(unit.written_off for unit in self.units)
 
 
 def format_cents(value: int | None) -> str:
@@ -156,6 +161,17 @@ class Sale:
 
 
 @dataclass(frozen=True, slots=True)
+class Writeoff:
+    id: int
+    product_id: int
+    cells: tuple[str, ...]
+    quantity: int
+    comment: str
+    created_at: datetime
+    cancelled_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class HistoryEntry:
     id: int
     product_id: int
@@ -169,6 +185,9 @@ class HistoryEntry:
     sale_id: int | None = None
     cancelled: bool = False
     can_cancel: bool = False
+    kind: str = ""
+    comment: str = ""
+    writeoff_id: int | None = None
 
     @property
     def values(self) -> tuple[str, ...]:
@@ -207,6 +226,7 @@ class Inventory:
     products: tuple[Product, ...]
     sales: tuple[Sale, ...] = ()
     history: tuple[HistoryEntry, ...] = ()
+    writeoffs: tuple[Writeoff, ...] = ()
 
     @property
     def sales_amount(self) -> str:
@@ -234,16 +254,22 @@ class Inventory:
 
     @property
     def available(self) -> int:
-        return self.total - self.sold
+        return self.total - self.sold - self.written_off
+
+    @property
+    def written_off(self) -> int:
+        return sum(product.written_off_count for product in self.products)
 
     @property
     def next_position(self) -> int:
         return max((int(product.cells[0]) for product in self.products), default=0) + 1
 
     def sorted_by(self, column: int, descending: bool = False) -> "Inventory":
-        if not 0 <= column <= 9:
+        if not 0 <= column <= 10:
             raise ValueError("Неизвестная колонка сортировки")
-        if column == 9:
+        if column == 10:
+            ordered = sorted(self.products, key=lambda product: product.written_off_count, reverse=descending)
+        elif column == 9:
             ordered = sorted(self.products, key=lambda product: product.showcase_quantity, reverse=descending)
         elif column == 8:
             ordered = sorted(self.products, key=lambda product: product.sold_count, reverse=descending)
@@ -260,25 +286,35 @@ class Inventory:
             )
         else:
             ordered = sorted(self.products, key=lambda product: self._natural_key(product.cells[column]), reverse=descending)
-        return Inventory(tuple(ordered), self.sales, self.history)
+        return Inventory(tuple(ordered), self.sales, self.history, self.writeoffs)
 
     @property
     def valuations(self) -> tuple[Valuation, ...]:
         results = []
-        for column, label in ((5, "Цена по ЦБ РФ"), (6, "Оптовая цена Emansi"), (7, "Средняя цена в магазинах")):
-            total, sold = Decimal(0), Decimal(0)
-            unpriced_total, unpriced_sold = 0, 0
+        for column, label in ((5, "Цена TheOneAlma +10%"), (6, "Оптовая цена Emansi"), (7, "Средняя цена в магазинах")):
+            total, sold, written_off = Decimal(0), Decimal(0), Decimal(0)
+            unpriced_total, unpriced_sold, unpriced_written_off = 0, 0, 0
             for product in self.products:
                 raw_price = product.cells[column]
                 if raw_price in ("", "—"):
                     unpriced_total += len(product.units)
                     unpriced_sold += product.sold_count
+                    unpriced_written_off += product.written_off_count
                 else:
                     price = Decimal(raw_price.replace(" ", "").replace(",", "."))
                     total += price * len(product.units)
                     sold += price * product.sold_count
+                    written_off += price * product.written_off_count
             results.append(
-                Valuation(label, total, sold, total - sold, unpriced_total, unpriced_sold, unpriced_total - unpriced_sold)
+                Valuation(
+                    label,
+                    total,
+                    sold,
+                    total - sold - written_off,
+                    unpriced_total,
+                    unpriced_sold,
+                    unpriced_total - unpriced_sold - unpriced_written_off,
+                )
             )
         return tuple(results)
 

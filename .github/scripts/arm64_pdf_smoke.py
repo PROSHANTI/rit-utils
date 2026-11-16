@@ -28,7 +28,7 @@ from pptx.util import Inches, Pt
 from src.utils.inventory.models import InventoryItem
 from src.utils.inventory.pdf_export import InventoryPdfExporter as ClinicPdfExporter
 from src.utils.inventory.repository import InventoryRepository as ClinicRepository
-from src.utils.one_alma.pdf_export import InventoryPdfExporter
+from src.utils.one_alma.pdf_export import InventoryPdfExporter, SalesPdfExporter
 from src.utils.one_alma.repository import InventoryRepository
 
 # Load the certificate implementation directly, as in the original smoke test.
@@ -147,11 +147,25 @@ with tempfile.TemporaryDirectory(prefix="one-alma-arm64-") as temporary:
     assert inventory.sold == 2 and inventory.showcase_quantity == 1
     assert inventory.history[0].description == f"Отмена продажи #{sale.id}"
     assert InventoryRepository(database).snapshot() == inventory
+    written = inventory_repository.record_writeoff(
+        second_product.id, 1, "ARM64 writeoff", "00000000-0000-4000-8000-000000000002"
+    )
+    assert (written.sold, written.written_off, written.available) == (2, 1, 47)
+    assert InventoryRepository(database).snapshot() == written
+    assert (
+        inventory_repository.record_writeoff(second_product.id, 1, "ARM64 writeoff", "00000000-0000-4000-8000-000000000002")
+        == written
+    )
+    assert inventory_repository.cancel_writeoff(written.writeoffs[-1].id).written_off == 0
     inventory_pdf = InventoryPdfExporter().export(inventory)
     assert inventory_pdf.startswith(b"%PDF-") and len(inventory_pdf) > 2000
+    sales_pdf = SalesPdfExporter().export(inventory)
+    assert sales_pdf.startswith(b"%PDF-") and len(sales_pdf) > 2000
     baseline["one_alma_pdf_bytes"] = len(inventory_pdf)
     baseline["one_alma_sqlite_persistence_ok"] = True
     baseline["one_alma_sales_history_ok"] = True
+    baseline["one_alma_writeoffs_ok"] = True
+    baseline["one_alma_sales_pdf_bytes"] = len(sales_pdf)
 
 with tempfile.TemporaryDirectory(prefix="clinic-inventory-arm64-") as temporary:
     database = Path(temporary) / "inventory.sqlite3"

@@ -160,6 +160,26 @@ class ApplicationRouter:
     def one_alma_cancel_sale(self, request: Request, sale_id: int, csrf_token: str = Form(...)) -> Response:
         return self.one_alma.cancel_sale(request, sale_id, csrf_token)
 
+    def one_alma_record_writeoff(
+        self,
+        request: Request,
+        product_id: int,
+        quantity: int = Form(..., ge=1, le=1000),
+        comment: str = Form("", max_length=255),
+        request_id: str = Form(..., max_length=64),
+        csrf_token: str = Form(...),
+    ) -> Response:
+        return self.one_alma.record_writeoff(request, product_id, quantity, comment, request_id, csrf_token)
+
+    def one_alma_cancel_writeoff(self, request: Request, writeoff_id: int, csrf_token: str = Form(...)) -> Response:
+        return self.one_alma.cancel_writeoff(request, writeoff_id, csrf_token)
+
+    def one_alma_sales_history(self) -> Response:
+        return self.one_alma.sales_history()
+
+    def one_alma_sales_pdf(self, sale_id: int | None = Query(None, ge=1)) -> Response:
+        return self.one_alma.download_sales_pdf(sale_id)
+
     def one_alma_history(self, product_id: int) -> Response:
         return self.one_alma.history(product_id)
 
@@ -189,7 +209,7 @@ class ApplicationRouter:
         )
         return self.one_alma.add_product(request, product, csrf_token)
 
-    def one_alma_pdf(self, sort: int = Query(0, ge=0, le=9), descending: bool = Query(False)) -> Response:
+    def one_alma_pdf(self, sort: int = Query(0, ge=0, le=10), descending: bool = Query(False)) -> Response:
         return self.one_alma.download_pdf(sort, descending)
 
     def one_alma_update_product(
@@ -293,6 +313,24 @@ class ApplicationRouter:
             ),
             ("/one_alma/products/{product_id}/history", self.one_alma_history, ["GET"], True, "История товара", ["OneAlma"]),
             ("/one_alma/sales/{sale_id}/cancel", self.one_alma_cancel_sale, ["POST"], True, "Отменить продажу", ["OneAlma"]),
+            ("/one_alma/sales", self.one_alma_sales_history, ["GET"], True, "История продаж", ["OneAlma"]),
+            ("/one_alma/sales/pdf", self.one_alma_sales_pdf, ["GET"], True, "Скачать продажи в PDF", ["OneAlma"]),
+            (
+                "/one_alma/products/{product_id}/writeoffs",
+                self.one_alma_record_writeoff,
+                ["POST"],
+                True,
+                "Списать товар",
+                ["OneAlma"],
+            ),
+            (
+                "/one_alma/writeoffs/{writeoff_id}/cancel",
+                self.one_alma_cancel_writeoff,
+                ["POST"],
+                True,
+                "Отменить списание",
+                ["OneAlma"],
+            ),
             ("/one_alma/units/{unit_id}", self.one_alma_sale, ["POST"], True, "Отметить продажу товара", ["OneAlma"]),
             ("/one_alma/products/{product_id}/sold", self.one_alma_sold_count, ["POST"], True, "Количество продаж", ["OneAlma"]),
             (
