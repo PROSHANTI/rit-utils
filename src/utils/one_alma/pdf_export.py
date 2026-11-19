@@ -200,7 +200,7 @@ class InventoryPdfExporter:
 class SalesPdfExporter:
     def export(self, inventory: Inventory, sale_id: int | None = None) -> bytes:
         InventoryPdfExporter._register_fonts()
-        sales = [sale for sale in reversed(inventory.sales) if sale_id is None or sale.id == sale_id]
+        sales = [sale for sale in reversed(inventory.active_sales) if sale_id is None or sale.id == sale_id]
         if sale_id is not None and not sales:
             raise LookupError("Продажа не найдена.")
         output = BytesIO()
@@ -220,10 +220,9 @@ class SalesPdfExporter:
         paragraph = InventoryPdfExporter._paragraph
         story = [paragraph("История продаж" if sale_id is None else f"Продажа #{sale_id}", title), Spacer(1, 4 * mm)]
         if sale_id is None:
-            active = [sale for sale in sales if sale.cancelled_at is None]
             story.extend(
                 [
-                    paragraph(f"Продано: {sum(sale.quantity for sale in active)} шт. Сумма: {inventory.sales_amount} ₽.", body),
+                    paragraph(f"Продано: {sum(sale.quantity for sale in sales)} шт. Сумма: {inventory.sales_amount} ₽.", body),
                     Spacer(1, 5 * mm),
                 ]
             )
@@ -249,9 +248,6 @@ class SalesPdfExporter:
                 Spacer(1, 2 * mm),
                 paragraph(f"Итого: {format_cents(sale.amount_cents)} ₽", receipt_title),
             ]
-            if sale.cancelled_at:
-                cancelled = sale.cancelled_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S")
-                receipt.append(paragraph(f"Отменена: {cancelled}", body))
             receipt.append(Spacer(1, 7 * mm))
             story.append(KeepTogether(receipt))
         document.build(story)

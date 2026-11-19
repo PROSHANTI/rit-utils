@@ -6,13 +6,13 @@
     <title>Учет OneAlma — RIT-UTILS</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/style_utils.css">
-    <link rel="stylesheet" href="/static/css/one_alma.css?v=table-headers-1">
+    <link rel="stylesheet" href="/static/css/one_alma.css?v=active-sales-1">
     <link rel="stylesheet" href="/static/css/import_dialog.css?v=import-ui-1">
     <link rel="stylesheet" href="/static/css/neon_icons.css?v=home-neon-1">
     <script src="/static/import_dialog.js?v=import-ui-1" defer></script>
     <script src="/static/one_alma_expiry.js?v=table-search-1" defer></script>
     <script src="/static/one_alma_search.js?v=table-search-1" defer></script>
-    <script src="/static/one_alma.js?v=table-search-1" defer></script>
+    <script src="/static/one_alma.js?v=active-sales-1" defer></script>
     {% include "ambient_background_head.html" %}
 </head>
 <body class="inventory-page">
@@ -142,7 +142,7 @@
                 <p id="writeoff-outcome" class="field-note" aria-live="polite"></p><p id="writeoff-error" class="error" role="alert"></p><button id="writeoff-save" type="submit">Сохранить</button>
             </form>
         </dialog>
-        <dialog id="sales-history-dialog" class="inventory-dialog sales-history" aria-labelledby="sales-history-heading"><div class="dialog-heading"><h2 id="sales-history-heading">История продаж</h2><button type="button" class="close-dialog" data-close aria-label="Закрыть историю продаж">×</button></div><p id="sales-history-summary" class="history-top"></p><div class="sales-history-tools"><label><input type="checkbox" id="show-cancelled-sales"> Показать отменённые</label><a class="secondary-button" href="/one_alma/sales/pdf" download="one_alma_sales.pdf">Скачать PDF продаж</a></div><div id="sales-history-content" class="sale-receipts"></div></dialog>
+        <dialog id="sales-history-dialog" class="inventory-dialog sales-history" aria-labelledby="sales-history-heading"><div class="dialog-heading"><h2 id="sales-history-heading">История продаж</h2><button type="button" class="close-dialog" data-close aria-label="Закрыть историю продаж">×</button></div><p id="sales-history-summary" class="history-top"></p><div class="sales-history-tools"><a class="secondary-button" href="/one_alma/sales/pdf" download="one_alma_sales.pdf">Скачать PDF продаж</a></div><div id="sales-history-content" class="sale-receipts"></div></dialog>
         <noscript><p class="error-message">Включите JavaScript, чтобы отмечать продажи.</p></noscript>
     </main>
     {% include "footer.html" %}

@@ -86,7 +86,7 @@ class OneAlmaHandler:
         return JSONResponse(
             {
                 "amount": inventory.sales_amount,
-                "sold": sum(sale.quantity for sale in inventory.sales if sale.cancelled_at is None),
+                "sold": sum(sale.quantity for sale in inventory.active_sales),
                 "unpriced": inventory.sales_unpriced,
                 "sales": [
                     {
@@ -98,14 +98,10 @@ class OneAlmaHandler:
                         "price": format_cents(sale.price_cents),
                         "amount": format_cents(sale.amount_cents),
                         "created_at": sale.created_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
-                        "cancelled_at": (
-                            sale.cancelled_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S")
-                            if sale.cancelled_at
-                            else None
-                        ),
-                        "can_cancel": sale.cancelled_at is None and sale.product_id in product_ids,
+                        "cancelled_at": None,
+                        "can_cancel": sale.product_id in product_ids,
                     }
-                    for sale in reversed(inventory.sales)
+                    for sale in reversed(inventory.active_sales)
                 ],
             },
             headers={"Cache-Control": "no-store"},
@@ -132,7 +128,7 @@ class OneAlmaHandler:
         product = next((product for product in inventory.products if product.id == product_id), None)
         if product is None:
             raise HTTPException(status_code=404, detail="Товар не найден.")
-        sales = [sale for sale in inventory.sales if sale.product_id == product_id and sale.cancelled_at is None]
+        sales = [sale for sale in inventory.active_sales if sale.product_id == product_id]
         return JSONResponse(
             {
                 "sold": product.sold_count,

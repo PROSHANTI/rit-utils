@@ -319,21 +319,23 @@ def test_inventory_pdf_separates_writeoffs_and_changes_from_sales(repository, pr
     assert "История изменений" not in sales_text and "Треснул" not in sales_text
 
 
-def test_cancelled_writeoff_and_single_sale_pdf_preserve_original_details(web, repository, product):
+def test_cancelled_writeoff_is_audited_and_cancelled_sale_pdf_is_unavailable(web, repository, product):
     client, _ = web
     writeoff_id = writeoff(repository, product).writeoffs[-1].id
     repository.cancel_writeoff(writeoff_id)
     first = repository.record_sale(product.id, 1, "Первый покупатель", "80", str(uuid4())).sales[-1]
-    repository.record_sale(product.id, 1, "Второй покупатель", "90", str(uuid4()))
+    second = repository.record_sale(product.id, 1, "Второй покупатель", "90", str(uuid4())).sales[-1]
     repository.cancel_sale(first.id)
 
-    sales = client.get(f"/one_alma/sales/pdf?sale_id={first.id}")
+    cancelled = client.get(f"/one_alma/sales/pdf?sale_id={first.id}")
+    sales = client.get(f"/one_alma/sales/pdf?sale_id={second.id}")
     missing = client.get("/one_alma/sales/pdf?sale_id=99999")
     text = pdf_text(sales.content)
     inventory_text = pdf_text(InventoryPdfExporter().export(repository.snapshot()))
 
-    assert sales.status_code == 200 and missing.status_code == 404
-    assert "Первый покупатель" in text and "Второй покупатель" not in text and "Отменена" in text
+    assert sales.status_code == 200 and cancelled.status_code == missing.status_code == 404
+    assert cancelled.json()["detail"] == "Продажа не найдена."
+    assert "Второй покупатель" in text and "Первый покупатель" not in text and "Отменена" not in text
     assert "Списанные товары" in inventory_text and "Отменено" in inventory_text
 
 

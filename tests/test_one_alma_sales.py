@@ -45,6 +45,102 @@ def sell(repository, product, quantity=1, customer="Макс", price="79,99", re
     return repository.record_sale(product.id, quantity, customer, price, request_id or str(uuid4()))
 
 
+@pytest.fixture
+def mixed_sales(repository, product):
+    cancelled = sell(repository, product, 2, "Отменённый покупатель", "999,99").sales[-1]
+    repository.cancel_sale(cancelled.id)
+    cancelled_unpriced = sell(repository, product, customer="Отменённый без цены", price="").sales[-1]
+    repository.cancel_sale(cancelled_unpriced.id)
+    paid = sell(repository, product, 2, "Анна & <компания>", "80,25").sales[-1]
+    free = sell(repository, product, customer="Без оплаты", price="0").sales[-1]
+    unpriced = sell(repository, product, customer="Цена не указана", price="").sales[-1]
+    return cancelled, cancelled_unpriced, paid, free, unpriced
+
+
+def test_sales_history_only_lists_active_receipts_and_matching_totals(web, repository, mixed_sales):
+    client, _ = web
+    before = repository.snapshot()
+    cancelled, cancelled_unpriced, paid, free, unpriced = mixed_sales
+
+    response = client.get("/one_alma/sales")
+
+    data = response.json()
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    assert [sale["id"] for sale in data["sales"]] == [unpriced.id, free.id, paid.id]
+    assert data["sold"] == sum(sale["quantity"] for sale in data["sales"]) == 4
+    assert data["amount"] == "160,50" and data["unpriced"] == 1
+    assert [sale["price"] for sale in data["sales"]] == ["—", "0,00", "80,25"]
+    assert all(sale["cancelled_at"] is None and sale["can_cancel"] for sale in data["sales"])
+    assert [sale.id for sale in before.sales if sale.cancelled_at] == [cancelled.id, cancelled_unpriced.id]
+    assert repository.snapshot() == before
+
+
+def test_cancelling_sale_removes_receipt_and_totals_but_keeps_audit(web, repository, mixed_sales, product):
+    client, csrf = web
+    sale = mixed_sales[2]
+
+    cancelled = client.post(f"/one_alma/sales/{sale.id}/cancel", data={"csrf_token": csrf})
+    data = client.get("/one_alma/sales").json()
+    audit = client.get(f"/one_alma/products/{product.id}/history").json()
+
+    assert cancelled.status_code == 200
+    assert sale.id not in [receipt["id"] for receipt in data["sales"]]
+    assert data["sold"] == 2 and data["amount"] == "0,00" and data["unpriced"] == 1
+    assert any(entry["sale_id"] == sale.id and entry["cancelled"] for entry in audit["entries"])
+    assert any(entry["values"][2] == f"Отмена продажи #{sale.id}" for entry in audit["entries"])
+    saved = InventoryRepository(repository.database).snapshot()
+    assert next(receipt for receipt in saved.sales if receipt.id == sale.id).cancelled_at is not None
+
+
+def test_sales_pdf_only_contains_active_receipts_and_matching_totals(web, repository, mixed_sales):
+    client, _ = web
+    before = repository.snapshot()
+    paid, free, unpriced = mixed_sales[2:]
+
+    response = client.get("/one_alma/sales/pdf")
+
+    text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(response.content)).pages)
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    assert "Продано: 4 шт. Сумма: 160,50 ₽." in text
+    assert [int(value) for value in re.findall(r"Продажа #(\d+)", text)] == [unpriced.id, free.id, paid.id]
+    assert "Анна & <компания>" in text and "Без оплаты" in text and "Цена не указана" in text
+    assert "Отменённый" not in text and "Отменена" not in text and "999,99" not in text
+    assert repository.snapshot() == before
+
+
+@pytest.mark.parametrize("with_cancelled_sale", [False, True])
+def test_empty_and_fully_cancelled_sales_history_and_pdf_are_empty(web, repository, product, with_cancelled_sale):
+    client, _ = web
+    if with_cancelled_sale:
+        sale = sell(repository, product).sales[-1]
+        repository.cancel_sale(sale.id)
+    before = repository.snapshot()
+
+    response = client.get("/one_alma/sales")
+    pdf = client.get("/one_alma/sales/pdf")
+
+    text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(pdf.content)).pages)
+    assert response.status_code == pdf.status_code == 200
+    assert response.json() == {"sales": [], "sold": 0, "amount": "0,00", "unpriced": 0}
+    assert "Продано: 0 шт. Сумма: 0,00 ₽." in text and "Продаж пока нет." in text
+    assert "Продажа #" not in text and "Отменена" not in text
+    assert repository.snapshot() == before
+
+
+def test_deleted_product_does_not_hide_its_active_sale(web, repository, product):
+    client, _ = web
+    sale = sell(repository, product).sales[-1]
+    repository.delete_products([product.id])
+
+    response = client.get("/one_alma/sales")
+    pdf = client.get(f"/one_alma/sales/pdf?sale_id={sale.id}")
+
+    assert response.status_code == pdf.status_code == 200
+    assert [receipt["id"] for receipt in response.json()["sales"]] == [sale.id]
+    assert response.json()["sales"][0]["can_cancel"] is False
+    assert f"Продажа #{sale.id}" in PdfReader(BytesIO(pdf.content)).pages[0].extract_text()
+
+
 def test_sale_preserves_products_prices_ids_and_uses_editable_price(repository, product):
     repository.set_showcase_quantity(product.id, 2)
     before = repository.snapshot()
@@ -298,7 +394,8 @@ def test_sale_history_cancel_endpoints_and_pdf(web, repository, product):
     assert "Отмена продажи" not in text
     sales_text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(sales_pdf.content)).pages)
     assert sales_pdf.status_code == 200
-    assert "Макс & компания" in sales_text and "80,25" in sales_text and "Отменена" in sales_text
+    assert "Продаж пока нет." in sales_text and "Продано: 0 шт." in sales_text
+    assert "Макс & компания" not in sales_text and "80,25" not in sales_text and "Отменена" not in sales_text
     assert "Москва, UTC+3" not in text and "Отмены сохранены отдельными строками" not in text
 
 

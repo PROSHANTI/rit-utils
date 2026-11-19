@@ -229,12 +229,16 @@ class Inventory:
     writeoffs: tuple[Writeoff, ...] = ()
 
     @property
+    def active_sales(self) -> tuple[Sale, ...]:
+        return tuple(sale for sale in self.sales if sale.cancelled_at is None)
+
+    @property
     def sales_amount(self) -> str:
-        return format_cents(sum(sale.amount_cents or 0 for sale in self.sales if sale.cancelled_at is None))
+        return format_cents(sum(sale.amount_cents or 0 for sale in self.active_sales))
 
     @property
     def sales_unpriced(self) -> int:
-        return sum(sale.quantity for sale in self.sales if sale.cancelled_at is None and sale.price_cents is None)
+        return sum(sale.quantity for sale in self.active_sales if sale.price_cents is None)
 
     @property
     def showcase_quantity(self) -> int:

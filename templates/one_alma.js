@@ -590,15 +590,14 @@
     function renderSales() {
         if (!salesData) return;
         const content = document.getElementById('sales-history-content');
-        const showCancelled = document.getElementById('show-cancelled-sales').checked;
         document.getElementById('sales-history-summary').textContent = `Продано: ${salesData.sold} шт. · Сумма: ${salesData.amount} ₽` +
             (salesData.unpriced ? ` · Без цены: ${salesData.unpriced} шт.` : '');
         content.replaceChildren();
-        const sales = salesData.sales.filter(sale => showCancelled || !sale.cancelled_at);
+        const sales = salesData.sales.filter(sale => !sale.cancelled_at);
         if (!sales.length) { content.appendChild(textElement('p', 'Продаж пока нет.', 'empty-message')); return; }
         for (const sale of sales) {
             const card = document.createElement('article');
-            card.className = `sale-receipt${sale.cancelled_at ? ' cancelled' : ''}`;
+            card.className = 'sale-receipt';
             const heading = document.createElement('div'); heading.className = 'receipt-heading';
             heading.append(textElement('h3', `Продажа #${sale.id}`), textElement('time', sale.created_at));
             card.append(heading, textElement('p', `Кому: ${sale.customer}`, 'receipt-customer'));
@@ -607,7 +606,6 @@
             const total = document.createElement('div'); total.className = 'receipt-total';
             total.append(textElement('span', 'Итого'), textElement('strong', `${sale.amount} ₽`));
             card.appendChild(total);
-            if (sale.cancelled_at) card.appendChild(textElement('p', `Отменена: ${sale.cancelled_at}`, 'receipt-cancelled'));
             const actions = document.createElement('div'); actions.className = 'receipt-actions';
             const pdf = textElement('a', 'PDF продажи', 'secondary-button');
             pdf.href = `/one_alma/sales/pdf?sale_id=${sale.id}`; pdf.download = `one_alma_sale_${sale.id}.pdf`;
@@ -633,7 +631,6 @@
         document.getElementById('sales-history-content').textContent = 'Загружаю…';
         salesHistoryDialog.showModal(); loadSales();
     });
-    document.getElementById('show-cancelled-sales').addEventListener('change', renderSales);
 
     container.querySelectorAll('[data-close]').forEach(button => {
         button.addEventListener('click', () => { if (!busy) button.closest('dialog').close(); });

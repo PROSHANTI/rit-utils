@@ -82,6 +82,7 @@ def test_page_home_card_and_button_placement(authenticated_client, inventory_rep
     assert len(re.findall("data-sort-column=", html)) == 11
     assert 'data-sort-column="5">Цена TheOneAlma +10% <span' in html
     assert 'id="sales-history"' in html and 'id="written-off-count"' in html
+    assert "show-cancelled-sales" not in html and "Показать отменённые" not in html
     assert 'data-sort-column="10">Списано <span' in html
     assert "10 000 UZS = 59,7137 ₽" in html
     assert "Цена по ЦБ РФ на 27.05, ₽" not in html

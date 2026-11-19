@@ -220,19 +220,15 @@ button:disabled { opacity: .5; cursor: default; }
 .writeoff-comment small { display: block; margin-top: 5px; text-align: right; color: #b8a6b1; font-size: 12px; }
 #writeoff-save { margin-top: 22px; }
 #writeoff-outcome { line-height: 1.6; margin-top: 18px; }
-.sales-history-tools { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 16px 0 22px; }
-.sales-history-tools label { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 13px; }
-.sales-history-tools input { width: 16px; height: 16px; margin: 0; accent-color: #e8789b; }
+.sales-history-tools { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin: 16px 0 22px; }
 .sale-receipts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sale-receipt { background: #251921; border: 1px solid #654353; border-radius: 12px; padding: 18px; }
-.sale-receipt.cancelled { opacity: .65; }
 .receipt-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .receipt-heading h3 { margin: 0; font-size: 16px; }
 .receipt-heading time { color: #c5aabb; font-size: 12px; }
 .receipt-customer, .receipt-quantity { color: #cdb6c3; font-size: 13px; margin-top: 12px; overflow-wrap: anywhere; }
 .receipt-product { font-size: 14px; line-height: 1.6; border-top: 1px dashed #705064; margin-top: 16px; padding-top: 14px; overflow-wrap: anywhere; }
 .receipt-total { display: flex; justify-content: space-between; gap: 14px; border-top: 1px dashed #705064; margin-top: 15px; padding-top: 13px; }
-.receipt-cancelled { color: #ffb1c3; font-size: 12px; margin-top: 12px; }
 .receipt-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
 .receipt-actions .secondary-button { font-size: 12px; padding: 8px 10px; }
 .sales-history .secondary-button { color: #e4cbd9; text-decoration: none; display: inline-block; border-radius: 7px; }
