@@ -233,6 +233,10 @@ class Inventory:
         return tuple(sale for sale in self.sales if sale.cancelled_at is None)
 
     @property
+    def numbered_sales(self) -> tuple[tuple[int, Sale], ...]:
+        return tuple(enumerate(self.active_sales, start=1))
+
+    @property
     def sales_amount(self) -> str:
         return format_cents(sum(sale.amount_cents or 0 for sale in self.active_sales))
 

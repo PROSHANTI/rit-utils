@@ -91,6 +91,7 @@ class OneAlmaHandler:
                 "sales": [
                     {
                         "id": sale.id,
+                        "number": number,
                         "product_id": sale.product_id,
                         "cells": sale.cells,
                         "customer": sale.customer or "Не указан",
@@ -101,7 +102,7 @@ class OneAlmaHandler:
                         "cancelled_at": None,
                         "can_cancel": sale.product_id in product_ids,
                     }
-                    for sale in reversed(inventory.active_sales)
+                    for number, sale in reversed(inventory.numbered_sales)
                 ],
             },
             headers={"Cache-Control": "no-store"},
@@ -319,13 +320,18 @@ class OneAlmaHandler:
 
     def download_sales_pdf(self, sale_id: int | None = None) -> Response:
         try:
-            content = self.sales_pdf.export(self.repository.snapshot(), sale_id)
+            inventory = self.repository.snapshot()
+            content = self.sales_pdf.export(inventory, sale_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         except sqlite3.Error:
             logger.exception("Не удалось прочитать продажи OneAlma для PDF")
             raise HTTPException(status_code=503, detail="История продаж временно недоступна.") from None
-        filename = f"one_alma_sale_{sale_id}.pdf" if sale_id else "one_alma_sales.pdf"
+        if sale_id is None:
+            filename = "one_alma_sales.pdf"
+        else:
+            number = next(number for number, sale in inventory.numbered_sales if sale.id == sale_id)
+            filename = f"one_alma_sale_{number}.pdf"
         return Response(
             content,
             media_type="application/pdf",

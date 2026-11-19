@@ -30,7 +30,7 @@ class Element {
 }
 
 function sale(id, overrides = {}) {
-    return {id, customer: 'Анна & <компания>', cells: ['1', '0262', 'Крем', '30 мл'], quantity: 2,
+    return {id, number: 1, customer: 'Анна & <компания>', cells: ['1', '0262', 'Крем', '30 мл'], quantity: 2,
         price: '80,25', amount: '160,50', created_at: '19.11.2026 11:35:00', cancelled_at: null,
         can_cancel: true, ...overrides};
 }
@@ -69,9 +69,9 @@ test('sales modal shows only active receipts without a cancelled-sales checkbox'
 
     assert.equal(ui.get('sales-history-dialog').open, true);
     assert.equal(ui.get('sales-history-content').children.length, 1);
-    assert.match(ui.get('sales-history-content').textContent, /Продажа #2/);
+    assert.match(ui.get('sales-history-content').textContent, /Продажа #1/);
     assert.match(ui.get('sales-history-content').textContent, /Анна & <компания>/);
-    assert.doesNotMatch(ui.get('sales-history-content').textContent, /Отменённый|Отменена:|Продажа #1/);
+    assert.doesNotMatch(ui.get('sales-history-content').textContent, /Отменённый|Отменена:|Продажа #2/);
     assert.match(ui.get('sales-history-summary').textContent, /Продано: 2 шт.*Сумма: 160,50/);
     assert.equal(ui.calls[0].url, '/one_alma/sales');
     assert.equal(ui.calls[0].options.credentials, 'same-origin');
@@ -89,8 +89,10 @@ test('cancelling a sale reloads receipts and totals and removes the cancelled re
     const cancel = receipt.children.at(-1).children.find(child => child.tagName === 'button');
 
     await cancel.click();
+    const confirmation = ui.get('undo-text').textContent;
     await ui.get('undo-confirm').click();
 
+    assert.match(confirmation, /Продажа #1\./);
     assert.equal(ui.get('undo-dialog').open, false);
     assert.equal(ui.get('sales-history-dialog').open, true);
     assert.equal(ui.get('sales-history-content').textContent.trim(), 'Продаж пока нет.');
@@ -113,4 +115,5 @@ test('receipt without a price keeps its date and PDF link and has no cancel acti
     assert.match(ui.get('sales-history-summary').textContent, /Без цены: 1 шт./);
     assert.equal(actions.children.length, 1);
     assert.equal(actions.children[0].href, '/one_alma/sales/pdf?sale_id=7');
+    assert.equal(actions.children[0].download, 'one_alma_sale_1.pdf');
 });

@@ -67,6 +67,7 @@ def test_sales_history_only_lists_active_receipts_and_matching_totals(web, repos
     data = response.json()
     assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
     assert [sale["id"] for sale in data["sales"]] == [unpriced.id, free.id, paid.id]
+    assert [sale["number"] for sale in data["sales"]] == [3, 2, 1]
     assert data["sold"] == sum(sale["quantity"] for sale in data["sales"]) == 4
     assert data["amount"] == "160,50" and data["unpriced"] == 1
     assert [sale["price"] for sale in data["sales"]] == ["—", "0,00", "80,25"]
@@ -85,6 +86,7 @@ def test_cancelling_sale_removes_receipt_and_totals_but_keeps_audit(web, reposit
 
     assert cancelled.status_code == 200
     assert sale.id not in [receipt["id"] for receipt in data["sales"]]
+    assert [receipt["number"] for receipt in data["sales"]] == [2, 1]
     assert data["sold"] == 2 and data["amount"] == "0,00" and data["unpriced"] == 1
     assert any(entry["sale_id"] == sale.id and entry["cancelled"] for entry in audit["entries"])
     assert any(entry["values"][2] == f"Отмена продажи #{sale.id}" for entry in audit["entries"])
@@ -95,16 +97,53 @@ def test_cancelling_sale_removes_receipt_and_totals_but_keeps_audit(web, reposit
 def test_sales_pdf_only_contains_active_receipts_and_matching_totals(web, repository, mixed_sales):
     client, _ = web
     before = repository.snapshot()
-    paid, free, unpriced = mixed_sales[2:]
 
     response = client.get("/one_alma/sales/pdf")
 
     text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(response.content)).pages)
     assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
     assert "Продано: 4 шт. Сумма: 160,50 ₽." in text
-    assert [int(value) for value in re.findall(r"Продажа #(\d+)", text)] == [unpriced.id, free.id, paid.id]
+    assert [int(value) for value in re.findall(r"Продажа #(\d+)", text)] == [3, 2, 1]
     assert "Анна & <компания>" in text and "Без оплаты" in text and "Цена не указана" in text
     assert "Отменённый" not in text and "Отменена" not in text and "999,99" not in text
+    assert repository.snapshot() == before
+
+
+@pytest.mark.parametrize("cancel_index", [2, 3, 4])
+def test_sale_after_cancellation_gets_next_display_number_without_changing_ids(
+    web, repository, product, mixed_sales, cancel_index
+):
+    client, _ = web
+    cancelled = mixed_sales[cancel_index]
+    repository.cancel_sale(cancelled.id)
+    before = repository.snapshot()
+
+    created = sell(repository, product, customer="Следующая продажа").sales[-1]
+    data = client.get("/one_alma/sales").json()
+
+    assert data["sales"][0]["id"] == created.id == 6
+    assert data["sales"][0]["number"] == len(before.active_sales) + 1 == 3
+    assert [receipt["number"] for receipt in data["sales"]] == [3, 2, 1]
+    assert cancelled.id not in [receipt["id"] for receipt in data["sales"]]
+    after = repository.snapshot()
+    assert after.sales[:-1] == before.sales
+    assert [sale.id for sale in after.sales] == [1, 2, 3, 4, 5, 6]
+
+
+@pytest.mark.parametrize("sale_index,display_number", [(2, 1), (3, 2), (4, 3)])
+def test_single_sale_pdf_uses_number_from_full_history(web, repository, mixed_sales, sale_index, display_number):
+    client, _ = web
+    sale = mixed_sales[sale_index]
+    before = repository.snapshot()
+
+    response = client.get(f"/one_alma/sales/pdf?sale_id={sale.id}")
+
+    reader = PdfReader(BytesIO(response.content))
+    text = "\n".join(page.extract_text() for page in reader.pages)
+    assert response.status_code == 200
+    assert f'filename="one_alma_sale_{display_number}.pdf"' in response.headers["content-disposition"]
+    assert re.findall(r"Продажа #(\d+)", text) == [str(display_number), str(display_number)]
+    assert sale.customer in text
     assert repository.snapshot() == before
 
 

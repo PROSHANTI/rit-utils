@@ -200,7 +200,7 @@ class InventoryPdfExporter:
 class SalesPdfExporter:
     def export(self, inventory: Inventory, sale_id: int | None = None) -> bytes:
         InventoryPdfExporter._register_fonts()
-        sales = [sale for sale in reversed(inventory.active_sales) if sale_id is None or sale.id == sale_id]
+        sales = [(number, sale) for number, sale in reversed(inventory.numbered_sales) if sale_id is None or sale.id == sale_id]
         if sale_id is not None and not sales:
             raise LookupError("Продажа не найдена.")
         output = BytesIO()
@@ -218,17 +218,19 @@ class SalesPdfExporter:
         title = ParagraphStyle("SalesTitle", parent=body, fontName="OneAlmaBold", fontSize=18, leading=24)
         receipt_title = ParagraphStyle("ReceiptTitle", parent=body, fontName="OneAlmaBold", fontSize=12, leading=18)
         paragraph = InventoryPdfExporter._paragraph
-        story = [paragraph("История продаж" if sale_id is None else f"Продажа #{sale_id}", title), Spacer(1, 4 * mm)]
+        story = [paragraph("История продаж" if sale_id is None else f"Продажа #{sales[0][0]}", title), Spacer(1, 4 * mm)]
         if sale_id is None:
             story.extend(
                 [
-                    paragraph(f"Продано: {sum(sale.quantity for sale in sales)} шт. Сумма: {inventory.sales_amount} ₽.", body),
+                    paragraph(
+                        f"Продано: {sum(sale.quantity for _, sale in sales)} шт. Сумма: {inventory.sales_amount} ₽.", body
+                    ),
                     Spacer(1, 5 * mm),
                 ]
             )
         if not sales:
             story.append(paragraph("Продаж пока нет.", body))
-        for sale in sales:
+        for number, sale in sales:
             created = sale.created_at.astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S")
             rows = [
                 [paragraph(label, header) for label in ("Товар", "Кол-во", "Цена за шт., ₽", "Сумма, ₽")],
@@ -240,7 +242,7 @@ class SalesPdfExporter:
                 ],
             ]
             receipt = [
-                paragraph(f"Продажа #{sale.id}", receipt_title),
+                paragraph(f"Продажа #{number}", receipt_title),
                 paragraph(created, body),
                 paragraph(f"Кому: {sale.customer or 'Не указан'}", body),
                 Spacer(1, 3 * mm),

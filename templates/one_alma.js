@@ -599,7 +599,7 @@
             const card = document.createElement('article');
             card.className = 'sale-receipt';
             const heading = document.createElement('div'); heading.className = 'receipt-heading';
-            heading.append(textElement('h3', `Продажа #${sale.id}`), textElement('time', sale.created_at));
+            heading.append(textElement('h3', `Продажа #${sale.number}`), textElement('time', sale.created_at));
             card.append(heading, textElement('p', `Кому: ${sale.customer}`, 'receipt-customer'));
             card.appendChild(textElement('p', `${sale.cells[1]} · ${sale.cells[2]}`, 'receipt-product'));
             card.appendChild(textElement('p', `${sale.cells[3]} · ${sale.quantity} шт. × ${sale.price} ₽`, 'receipt-quantity'));
@@ -608,13 +608,13 @@
             card.appendChild(total);
             const actions = document.createElement('div'); actions.className = 'receipt-actions';
             const pdf = textElement('a', 'PDF продажи', 'secondary-button');
-            pdf.href = `/one_alma/sales/pdf?sale_id=${sale.id}`; pdf.download = `one_alma_sale_${sale.id}.pdf`;
+            pdf.href = `/one_alma/sales/pdf?sale_id=${sale.id}`; pdf.download = `one_alma_sale_${sale.number}.pdf`;
             actions.appendChild(pdf);
             if (sale.can_cancel) {
                 const cancel = textElement('button', 'Отменить продажу', 'secondary-button');
                 cancel.type = 'button'; cancel.disabled = busy;
                 cancel.addEventListener('click', () => openCancellation('sale', sale.id,
-                    `Продажа #${sale.id}. ${sale.customer}, ${sale.quantity} шт. Вернуть их в остаток?`));
+                    `Продажа #${sale.number}. ${sale.customer}, ${sale.quantity} шт. Вернуть их в остаток?`));
                 actions.appendChild(cancel);
             }
             card.appendChild(actions); content.appendChild(card);
